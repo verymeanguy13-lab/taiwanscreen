@@ -78,13 +78,13 @@ function netColor(n: number): string {
 }
 
 // ── Custom tooltip for institutional chart ────────────────────────────────────
-function InstitutionalTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function InstitutionalTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded px-3 py-2 text-xs shadow-lg"
       style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
       <div className="mb-1 font-semibold" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      {payload.map(p => (
+      {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center justify-between gap-4">
           <span style={{ color: p.fill }}>{p.name}</span>
           <span className="num">{fmtNet(p.value as number)} 張</span>
@@ -95,13 +95,13 @@ function InstitutionalTooltip({ active, payload, label }: TooltipProps<number, s
 }
 
 // ── Custom tooltip for margin chart ──────────────────────────────────────────
-function MarginTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function MarginTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded px-3 py-2 text-xs shadow-lg"
       style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
       <div className="mb-1 font-semibold" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      {payload.map(p => (
+      {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center justify-between gap-4">
           <span style={{ color: p.stroke }}>{p.name}</span>
           <span className="num">{Number(p.value ?? 0).toLocaleString('en-US')} 張</span>

@@ -26,7 +26,7 @@ export async function queryUnsafe<T>(
   sqlString: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const rows = await sql.unsafe(sqlString, params);
+  const rows = await (sql as any).unsafe(sqlString, params);
   return rows as T[];
 }
 

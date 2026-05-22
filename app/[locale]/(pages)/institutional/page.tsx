@@ -67,13 +67,14 @@ function NetCell({ v }: { v: number | null | undefined }) {
 }
 
 // ── Trend chart tooltip ───────────────────────────────────────────────────────
-function TrendTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function TrendTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded px-3 py-2 text-xs shadow-lg"
       style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
       <div className="mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      {payload.map(p => (
+      {payload.map((p: any) => (
+      
         <div key={p.dataKey} className="flex items-center justify-between gap-4">
           <span style={{ color: p.stroke }}>{p.name}</span>
           <span className="num">{formatNTD(n(p.value) * 1000)}</span>

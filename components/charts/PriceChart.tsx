@@ -61,10 +61,10 @@ function formatDate(dateStr: string, range: Range): string {
 }
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
-function CustomTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
-  const close  = payload.find(p => p.dataKey === 'close')?.value;
-  const volume = payload.find(p => p.dataKey === 'volume')?.value;
+const close  = payload.find((p: any) => p.dataKey === 'close')?.value;
+const volume = payload.find((p: any) => p.dataKey === 'volume')?.value;
   return (
     <div
       className="rounded px-3 py-2 text-xs shadow-lg"
