@@ -1,7 +1,7 @@
 'use client';
 
-
 import './globals.css';
+import { NextIntlClientProvider } from 'next-intl';
 import { SessionProvider } from 'next-auth/react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
