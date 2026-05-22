@@ -2,33 +2,43 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Zap, Menu, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
-const NAV_LINKS = [
-  { label: '選股器',   href: '/screener' },
-  { label: '熱力圖',   href: '/heatmap' },
-  { label: '法人動向', href: '/institutional' },
-  { label: '券商分點', href: '/broker' },
-  { label: '融資融券', href: '/margin' },
-  { label: 'ETF比較',  href: '/etf' },
-  { label: '殖利率',   href: '/dividend' },
-  { label: '供應鏈',   href: '/supply-chain' },
-  { label: '回測',     href: '/backtest' },
+const NAV_KEYS = [
+  { key: 'nav.screener',     href: '/screener'     },
+  { key: 'nav.heatmap',      href: '/heatmap'      },
+  { key: 'nav.institutional',href: '/institutional' },
+  { key: 'nav.broker',       href: '/broker'        },
+  { key: 'nav.margin',       href: '/margin'        },
+  { key: 'nav.etf',          href: '/etf'           },
+  { key: 'nav.dividend',     href: '/dividend'      },
+  { key: 'nav.supplyChain',  href: '/supply-chain'  },
+  { key: 'nav.backtest',     href: '/backtest'      },
 ];
 
 export default function Navbar() {
+  const t        = useTranslations();
   const pathname = usePathname();
+  const router   = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [lang, setLang] = useState<'zh' | 'en'>('zh');
+
+  // Detect current locale from pathname prefix
+  const currentLocale = pathname.startsWith('/en') ? 'en' : 'zh';
 
   const handleLangToggle = () => {
-    const next = lang === 'zh' ? 'en' : 'zh';
-    setLang(next);
-    console.log('Language toggled to:', next);
+    const nextLocale = currentLocale === 'zh' ? 'en' : 'zh';
+    // Replace /zh or /en prefix with the new locale
+    const newPath = pathname.replace(/^\/(zh|en)/, `/${nextLocale}`);
+    router.push(newPath);
   };
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  const isActive = (href: string) => {
+    // Strip locale prefix for comparison
+    const stripped = pathname.replace(/^\/(zh|en)/, '');
+    return stripped === href || stripped.startsWith(href + '/');
+  };
 
   return (
     <header
@@ -41,7 +51,7 @@ export default function Navbar() {
       <div className="mx-auto flex h-14 max-w-screen-xl items-center justify-between px-4">
 
         {/* ── Logo ── */}
-        <Link href="/" className="flex shrink-0 items-center gap-2">
+        <Link href={`/${currentLocale}`} className="flex shrink-0 items-center gap-2">
           <Zap
             size={20}
             strokeWidth={2.5}
@@ -57,10 +67,10 @@ export default function Navbar() {
 
         {/* ── Center nav (desktop) ── */}
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map(({ label, href }) => (
+          {NAV_KEYS.map(({ key, href }) => (
             <Link
               key={href}
-              href={href}
+              href={`/${currentLocale}${href}`}
               className="rounded px-3 py-1.5 text-sm font-medium transition-colors duration-150"
               style={{
                 color: isActive(href)
@@ -69,16 +79,14 @@ export default function Navbar() {
               }}
               onMouseEnter={e => {
                 if (!isActive(href))
-                  (e.currentTarget as HTMLElement).style.color =
-                    'var(--text-primary)';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
               }}
               onMouseLeave={e => {
                 if (!isActive(href))
-                  (e.currentTarget as HTMLElement).style.color =
-                    'var(--text-secondary)';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
               }}
             >
-              {label}
+              {t(key)}
             </Link>
           ))}
         </nav>
@@ -94,20 +102,18 @@ export default function Navbar() {
               border: '1px solid var(--border)',
             }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.color =
-                'var(--text-primary)';
+              (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.color =
-                'var(--text-secondary)';
+              (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
             }}
           >
-            {lang === 'zh' ? 'EN' : '中'}
+            {currentLocale === 'zh' ? 'EN' : '中'}
           </button>
 
           {/* Login */}
           <Link
-            href="/login"
+            href={`/${currentLocale}/login`}
             className="hidden md:inline-flex h-8 items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
             style={{
               color: 'var(--accent-blue)',
@@ -124,7 +130,7 @@ export default function Navbar() {
               el.style.color = 'var(--accent-blue)';
             }}
           >
-            登入
+            {t('nav.login')}
           </Link>
 
           {/* Hamburger (mobile only) */}
@@ -149,10 +155,10 @@ export default function Navbar() {
           }}
         >
           <nav className="flex flex-col gap-1">
-            {NAV_LINKS.map(({ label, href }) => (
+            {NAV_KEYS.map(({ key, href }) => (
               <Link
                 key={href}
-                href={href}
+                href={`/${currentLocale}${href}`}
                 onClick={() => setMobileOpen(false)}
                 className="rounded px-3 py-2 text-sm font-medium transition-colors duration-150"
                 style={{
@@ -161,7 +167,7 @@ export default function Navbar() {
                     : 'var(--text-secondary)',
                 }}
               >
-                {label}
+                {t(key)}
               </Link>
             ))}
           </nav>
@@ -182,10 +188,10 @@ export default function Navbar() {
                 border: '1px solid var(--border)',
               }}
             >
-              {lang === 'zh' ? 'EN' : '中'}
+              {currentLocale === 'zh' ? 'EN' : '中'}
             </button>
             <Link
-              href="/login"
+              href={`/${currentLocale}/login`}
               onClick={() => setMobileOpen(false)}
               className="h-8 rounded px-3 text-sm font-medium"
               style={{
@@ -193,7 +199,7 @@ export default function Navbar() {
                 border: '1px solid var(--accent-blue)',
               }}
             >
-              登入
+              {t('nav.login')}
             </Link>
           </div>
         </div>
