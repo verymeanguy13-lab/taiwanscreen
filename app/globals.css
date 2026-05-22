@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;700&family=Inter:wght@400;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary:     #08090E;
+  --bg-secondary:   #0F1117;
+  --bg-card:        #141720;
+  --border:         #1E2235;
+  --text-primary:   #F0F0F0;
+  --text-secondary: #8B8FA8;
+  --text-muted:     #4A4F6A;
+  --accent-green:   #00D4AA;
+  --accent-red:     #FF4D6D;
+  --accent-gold:    #F5B700;
+  --accent-blue:    #3D8EF8;
+  --accent-orange:  #FF8C42;
+  --accent-purple:  #9B59B6;
+}
+
+body {
+  font-family: 'Noto Sans TC', 'Inter', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.num {
+  font-family: 'IBM Plex Mono', monospace;
+}
