@@ -1,10 +1,10 @@
-'use client';
-
+import type { Metadata } from 'next';
 import './globals.css';
-import { NextIntlClientProvider } from 'next-intl';
-import { SessionProvider } from 'next-auth/react';
-import Navbar from '@/components/layout/Navbar';
-import Footer from '@/components/layout/Footer';
+
+export const metadata: Metadata = {
+  title: 'Taiwan Screen | 台股雷達',
+  description: '台灣最完整的免費股票研究平台',
+};
 
 export default function RootLayout({
   children,
@@ -14,11 +14,7 @@ export default function RootLayout({
   return (
     <html lang="zh-TW">
       <body>
-        <SessionProvider>
-          <Navbar />
-          {children}
-          <Footer />
-        </SessionProvider>
+        {children}
       </body>
     </html>
   );
