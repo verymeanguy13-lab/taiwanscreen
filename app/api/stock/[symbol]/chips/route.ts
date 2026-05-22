@@ -1,7 +1,6 @@
 // =============================================================================
 // app/api/stock/[symbol]/chips/route.ts
 // GET /api/stock/2330/chips
-// Returns institutional flows, margin data, and broker rankings.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -9,15 +8,15 @@ import { queryUnsafe } from '@/lib/db';
 import { cached } from '@/lib/cache';
 
 interface InstitutionalSummary {
-  foreign_5d:                number;
-  foreign_10d:               number;
-  foreign_20d:               number;
-  trust_5d:                  number;
-  trust_10d:                 number;
-  trust_20d:                 number;
-  foreign_consecutive_days:  number;
-  trust_consecutive_days:    number;
-  is_triple_buy:             boolean;
+  foreign_5d:               number;
+  foreign_10d:              number;
+  foreign_20d:              number;
+  trust_5d:                 number;
+  trust_10d:                number;
+  trust_20d:                number;
+  foreign_consecutive_days: number;
+  trust_consecutive_days:   number;
+  is_triple_buy:            boolean;
 }
 
 interface BrokerRankRow {
@@ -30,9 +29,11 @@ interface BrokerRankRow {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { symbol: string } },
+  { params }: { params: Promise<{ symbol: string }> },
 ) {
-  const symbol = params.symbol?.toUpperCase().trim();
+  const { symbol: rawSymbol } = await params;
+  const symbol = rawSymbol?.toUpperCase().trim();
+
   if (!symbol) {
     return NextResponse.json({ error: 'Missing symbol' }, { status: 400 });
   }
@@ -41,7 +42,6 @@ export async function GET(
 
   try {
     const result = await cached(cacheKey, 15 * 60, async () => {
-      // ── Run all queries in parallel ──────────────────────────────────
       const [
         flowRows,
         marginRows,
@@ -69,7 +69,7 @@ export async function GET(
           [symbol],
         ),
 
-        // 4a. Top 10 broker buyers (net_20d DESC)
+        // 4a. Top 10 broker buyers
         queryUnsafe<BrokerRankRow>(
           `SELECT
              bf.broker_id,
@@ -89,7 +89,7 @@ export async function GET(
           [symbol],
         ),
 
-        // 4b. Top 10 broker sellers (net_20d ASC)
+        // 4b. Top 10 broker sellers
         queryUnsafe<BrokerRankRow>(
           `SELECT
              bf.broker_id,
@@ -110,11 +110,11 @@ export async function GET(
         ),
       ]);
 
-      // ── 2. Compute institutional summary from flowRows ────────────────
-      const now   = new Date();
-      const d5    = new Date(now); d5.setDate(now.getDate() - 5);
-      const d10   = new Date(now); d10.setDate(now.getDate() - 10);
-      const d20   = new Date(now); d20.setDate(now.getDate() - 20);
+      // Compute institutional summary
+      const now  = new Date();
+      const d5   = new Date(now); d5.setDate(now.getDate() - 5);
+      const d10  = new Date(now); d10.setDate(now.getDate() - 10);
+      const d20  = new Date(now); d20.setDate(now.getDate() - 20);
 
       type FlowRow = {
         date: string;
@@ -132,7 +132,6 @@ export async function GET(
           .filter(r => new Date(r.date) >= since)
           .reduce((s, r) => s + (Number(r[field]) || 0), 0);
 
-      // Latest row (last in ASC-ordered array)
       const latest = flows[flows.length - 1];
 
       const summary: InstitutionalSummary = {
@@ -147,7 +146,6 @@ export async function GET(
         is_triple_buy:            latest?.triple_buy === true,
       };
 
-      // Normalise broker number fields (Neon returns strings for BIGINT/SUM)
       const normBroker = (rows: BrokerRankRow[]) =>
         rows.map(r => ({
           broker_id:   r.broker_id,
@@ -158,9 +156,9 @@ export async function GET(
         }));
 
       return {
-        institutionalFlows:    flows,
-        institutionalSummary:  summary,
-        marginData:            marginRows,
+        institutionalFlows:   flows,
+        institutionalSummary: summary,
+        marginData:           marginRows,
         brokerRanking: {
           buyers:  normBroker(brokerBuyRows),
           sellers: normBroker(brokerSellRows),

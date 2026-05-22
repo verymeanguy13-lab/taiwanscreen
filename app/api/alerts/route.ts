@@ -1,8 +1,7 @@
 // =============================================================================
 // app/api/alerts/route.ts
-// GET    /api/alerts       — list user's active alerts
-// POST   /api/alerts       — create a new alert
-// DELETE /api/alerts/[id]  — deactivate an alert (set is_active = false)
+// GET    /api/alerts  — list user's active alerts
+// POST   /api/alerts  — create a new alert
 // All routes require an active session.
 // =============================================================================
 
@@ -13,9 +12,7 @@ import { queryUnsafe } from '@/lib/db';
 
 const FREE_ALERT_LIMIT = 3;
 
-// ── Helper: resolve user_id from email ────────────────────────────────────────
 async function getUserId(email: string): Promise<number | null> {
-  // Upsert user on first use so we never need a separate registration step
   const rows = await queryUnsafe<{ id: number }>(
     `INSERT INTO users (email)
      VALUES ($1)
@@ -26,7 +23,6 @@ async function getUserId(email: string): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
-// ── GET — list active alerts ──────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -53,7 +49,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST — create new alert ───────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -76,14 +71,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Could not resolve user' }, { status: 500 });
     }
 
-    // Check free plan limit
     const countRows = await queryUnsafe<{ count: string }>(
       `SELECT COUNT(*) AS count FROM alerts WHERE user_id = $1 AND is_active = TRUE`,
       [userId],
     );
     const currentCount = parseInt(countRows[0]?.count ?? '0', 10);
 
-    // TODO: check plan from users table when billing is added
     if (currentCount >= FREE_ALERT_LIMIT) {
       return NextResponse.json(
         { error: 'Free plan limit reached', limit: FREE_ALERT_LIMIT, upgrade_required: true },
@@ -91,7 +84,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify stock exists
     const stockRows = await queryUnsafe<{ symbol: string }>(
       `SELECT symbol FROM stocks WHERE symbol = $1`,
       [symbol.toUpperCase()],
@@ -110,46 +102,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data: { id: inserted[0].id } }, { status: 201 });
   } catch (err) {
     console.error('[alerts POST]', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-// ── DELETE — deactivate alert ─────────────────────────────────────────────────
-// Route: DELETE /api/alerts/[id]
-// This handler lives in the same file but reads the id from the URL.
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const alertId = parseInt(params?.id ?? '', 10);
-  if (isNaN(alertId)) {
-    return NextResponse.json({ error: 'Invalid alert id' }, { status: 400 });
-  }
-
-  try {
-    // Only deactivate alerts belonging to this user
-    const updated = await queryUnsafe<{ id: number }>(
-      `UPDATE alerts
-       SET is_active = FALSE
-       WHERE id = $1
-         AND user_id = (SELECT id FROM users WHERE email = $2)
-         AND is_active = TRUE
-       RETURNING id`,
-      [alertId, session.user.email],
-    );
-
-    if (!updated[0]) {
-      return NextResponse.json({ error: 'Alert not found or already inactive' }, { status: 404 });
-    }
-
-    return NextResponse.json({ data: { deleted: true, id: alertId } });
-  } catch (err) {
-    console.error('[alerts DELETE]', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

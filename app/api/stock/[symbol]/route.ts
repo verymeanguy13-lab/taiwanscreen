@@ -11,9 +11,11 @@ import type { StockDetailPayload } from '@/types';
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { symbol: string } },
+  { params }: { params: Promise<{ symbol: string }> },
 ) {
-  const symbol = params.symbol?.toUpperCase().trim();
+  const { symbol: rawSymbol } = await params;
+  const symbol = rawSymbol?.toUpperCase().trim();
+
   if (!symbol) {
     return NextResponse.json({ error: 'Missing symbol' }, { status: 400 });
   }
@@ -25,7 +27,6 @@ export async function GET(
       cacheKey,
       15 * 60,
       async () => {
-        // ── Run all queries in parallel ──────────────────────────────────
         const [
           infoRows,
           quoteRows,
@@ -63,7 +64,7 @@ export async function GET(
             [symbol],
           ),
 
-          // 4. Price history — last 365 days, oldest first
+          // 4. Price history — last 365 days
           queryUnsafe(
             `SELECT date, open, high, low, close, volume
              FROM daily_prices
@@ -88,7 +89,7 @@ export async function GET(
             [symbol],
           ),
 
-          // 7. Supply chain — this stock as parent (what it supplies to)
+          // 7. Supply chain — this stock as parent
           queryUnsafe(
             `SELECT sc.*, s.name_zh, s.sector
              FROM supply_chain sc
@@ -97,7 +98,7 @@ export async function GET(
             [symbol],
           ),
 
-          // 8. Supply chain — this stock as child (who supplies to it)
+          // 8. Supply chain — this stock as child
           queryUnsafe(
             `SELECT sc.*, s.name_zh, s.sector
              FROM supply_chain sc
@@ -107,7 +108,6 @@ export async function GET(
           ),
         ]);
 
-        // ── 404 if stock not found ────────────────────────────────────────
         if (!infoRows[0]) return null;
 
         return {
