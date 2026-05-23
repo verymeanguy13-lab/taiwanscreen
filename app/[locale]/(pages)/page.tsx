@@ -206,7 +206,7 @@ function TopForeignBuyColumn() {
         </p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(data ?? []).map((item, i) => (
+          {(Array.isArray(data) ? data : []).map((item, i) => (
             <li
               key={item.symbol}
               className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
@@ -257,7 +257,7 @@ function TripleBuyColumn() {
         </p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(data ?? []).map(item => (
+          {(Array.isArray(data) ? data : []).map(item => (
             <li
               key={item.symbol}
               className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
@@ -305,7 +305,7 @@ function UpcomingDividendColumn() {
         </p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(data ?? []).map(item => (
+          {(Array.isArray(data) ? data : []).map(item => (
             <li
               key={item.symbol}
               className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
