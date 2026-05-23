@@ -6,20 +6,20 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Zap, Menu, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
-const NAV_KEYS = [
-  { key: 'nav.screener',     href: '/screener'     },
-  { key: 'nav.heatmap',      href: '/heatmap'      },
-  { key: 'nav.institutional',href: '/institutional' },
-  { key: 'nav.broker',       href: '/broker'        },
-  { key: 'nav.margin',       href: '/margin'        },
-  { key: 'nav.etf',          href: '/etf'           },
-  { key: 'nav.dividend',     href: '/dividend'      },
-  { key: 'nav.supplyChain',  href: '/supply-chain'  },
-  { key: 'nav.backtest',     href: '/backtest'      },
+const NAV_LINKS = [
+  { key: 'screener',     href: '/screener'     },
+  { key: 'heatmap',      href: '/heatmap'      },
+  { key: 'institutional',href: '/institutional' },
+  { key: 'broker',       href: '/broker'        },
+  { key: 'margin',       href: '/margin'        },
+  { key: 'etf',          href: '/etf'           },
+  { key: 'dividend',     href: '/dividend'      },
+  { key: 'supplyChain',  href: '/supply-chain'  },
+  { key: 'backtest',     href: '/backtest'      },
 ];
 
 export default function Navbar() {
-  const t        = useTranslations();
+  const t        = useTranslations('nav');
   const pathname = usePathname();
   const router   = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -29,13 +29,11 @@ export default function Navbar() {
 
   const handleLangToggle = () => {
     const nextLocale = currentLocale === 'zh' ? 'en' : 'zh';
-    // Replace /zh or /en prefix with the new locale
     const newPath = pathname.replace(/^\/(zh|en)/, `/${nextLocale}`);
     router.push(newPath);
   };
 
   const isActive = (href: string) => {
-    // Strip locale prefix for comparison
     const stripped = pathname.replace(/^\/(zh|en)/, '');
     return stripped === href || stripped.startsWith(href + '/');
   };
@@ -52,30 +50,21 @@ export default function Navbar() {
 
         {/* ── Logo ── */}
         <Link href={`/${currentLocale}`} className="flex shrink-0 items-center gap-2">
-          <Zap
-            size={20}
-            strokeWidth={2.5}
-            style={{ color: 'var(--accent-green)' }}
-          />
-          <span
-            className="text-base font-bold tracking-wide"
-            style={{ color: 'var(--text-primary)' }}
-          >
+          <Zap size={20} strokeWidth={2.5} style={{ color: 'var(--accent-green)' }} />
+          <span className="text-base font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>
             台股雷達
           </span>
         </Link>
 
         {/* ── Center nav (desktop) ── */}
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_KEYS.map(({ key, href }) => (
+          {NAV_LINKS.map(({ key, href }) => (
             <Link
               key={href}
               href={`/${currentLocale}${href}`}
               className="rounded px-3 py-1.5 text-sm font-medium transition-colors duration-150"
               style={{
-                color: isActive(href)
-                  ? 'var(--accent-green)'
-                  : 'var(--text-secondary)',
+                color: isActive(href) ? 'var(--accent-green)' : 'var(--text-secondary)',
               }}
               onMouseEnter={e => {
                 if (!isActive(href))
@@ -97,16 +86,9 @@ export default function Navbar() {
           <button
             onClick={handleLangToggle}
             className="hidden md:inline-flex h-8 w-10 items-center justify-center rounded text-xs font-semibold transition-colors duration-150"
-            style={{
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border)',
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-            }}
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
           >
             {currentLocale === 'zh' ? 'EN' : '中'}
           </button>
@@ -115,10 +97,7 @@ export default function Navbar() {
           <Link
             href={`/${currentLocale}/login`}
             className="hidden md:inline-flex h-8 items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
-            style={{
-              color: 'var(--accent-blue)',
-              border: '1px solid var(--accent-blue)',
-            }}
+            style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement;
               el.style.backgroundColor = 'var(--accent-blue)';
@@ -130,7 +109,7 @@ export default function Navbar() {
               el.style.color = 'var(--accent-blue)';
             }}
           >
-            {t('nav.login')}
+            {t('login')}
           </Link>
 
           {/* Hamburger (mobile only) */}
@@ -149,22 +128,17 @@ export default function Navbar() {
       {mobileOpen && (
         <div
           className="md:hidden border-t px-4 pb-4 pt-2"
-          style={{
-            backgroundColor: 'var(--bg-primary)',
-            borderColor: 'var(--border)',
-          }}
+          style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)' }}
         >
           <nav className="flex flex-col gap-1">
-            {NAV_KEYS.map(({ key, href }) => (
+            {NAV_LINKS.map(({ key, href }) => (
               <Link
                 key={href}
                 href={`/${currentLocale}${href}`}
                 onClick={() => setMobileOpen(false)}
                 className="rounded px-3 py-2 text-sm font-medium transition-colors duration-150"
                 style={{
-                  color: isActive(href)
-                    ? 'var(--accent-green)'
-                    : 'var(--text-secondary)',
+                  color: isActive(href) ? 'var(--accent-green)' : 'var(--text-secondary)',
                 }}
               >
                 {t(key)}
@@ -172,21 +146,11 @@ export default function Navbar() {
             ))}
           </nav>
 
-          {/* Mobile bottom row */}
-          <div
-            className="mt-3 flex items-center gap-2 border-t pt-3"
-            style={{ borderColor: 'var(--border)' }}
-          >
+          <div className="mt-3 flex items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
             <button
-              onClick={() => {
-                handleLangToggle();
-                setMobileOpen(false);
-              }}
+              onClick={() => { handleLangToggle(); setMobileOpen(false); }}
               className="h-8 w-10 rounded text-xs font-semibold"
-              style={{
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
               {currentLocale === 'zh' ? 'EN' : '中'}
             </button>
@@ -194,12 +158,9 @@ export default function Navbar() {
               href={`/${currentLocale}/login`}
               onClick={() => setMobileOpen(false)}
               className="h-8 rounded px-3 text-sm font-medium"
-              style={{
-                color: 'var(--accent-blue)',
-                border: '1px solid var(--accent-blue)',
-              }}
+              style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
             >
-              {t('nav.login')}
+              {t('login')}
             </Link>
           </div>
         </div>

@@ -1,8 +1,6 @@
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
-import { SessionProvider } from 'next-auth/react';
-import Navbar from '@/components/layout/Navbar';
-import Footer from '@/components/layout/Footer';
+import ClientProviders from './ClientProviders';
 
 export default async function LocaleLayout({
   children,
@@ -16,11 +14,9 @@ export default async function LocaleLayout({
 
   return (
     <NextIntlClientProvider locale={locale} messages={messages}>
-      <SessionProvider>
-        <Navbar />
+      <ClientProviders>
         {children}
-        <Footer />
-      </SessionProvider>
+      </ClientProviders>
     </NextIntlClientProvider>
   );
 }
