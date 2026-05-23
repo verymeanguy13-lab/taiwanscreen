@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { formatChange, formatNTD } from '@/lib/utils';
 import type { StockDetailPayload } from '@/types';
 import { ShareholdersTab } from '@/components/ShareholdersTab';
+import { HealthScore } from '@/components/stock/HealthScore';
 
 const fetcher = (url: string) =>
   fetch(url).then(r => {
@@ -152,6 +153,9 @@ export default function StockPage() {
             <Badge variant={info.market === 'TWSE' ? 'green' : 'gold'}>{info.market}</Badge>
           </div>
         </div>
+
+        {/* ── HEALTH SCORE ───────────────────────────────────────────────── */}
+        <HealthScore symbol={symbol} />
 
         {/* ── PRICE CHART ────────────────────────────────────────────────── */}
         <PriceChart data={priceHistory as any} />
