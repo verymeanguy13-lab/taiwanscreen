@@ -103,7 +103,9 @@ function LiveMarketBar() {
   const { data, error } = useSWR(
     '/api/heatmap',
     fetcher,
-    { refreshInterval: 60_000 }
+    { refreshInterval: 0,
+      shouldRetryOnError: false
+    }
   );
 
   const summary = data?.data?.marketSummary;
@@ -186,7 +188,9 @@ function FeatureCard({
 function TopForeignBuyColumn() {
   const { data, error } = useSWR<TopForeignBuy[]>(
     '/api/institutional?mode=top_foreign_buy&limit=5',
-    fetcher
+    fetcher,{
+      shouldRetryOnError: false
+    }
   );
 
   return (
@@ -235,7 +239,9 @@ function TopForeignBuyColumn() {
 function TripleBuyColumn() {
   const { data, error } = useSWR<TripleBuy[]>(
     '/api/institutional?mode=triple_buy',
-    fetcher
+    fetcher,{
+      shouldRetryOnError: false
+    }
   );
 
   return (
@@ -281,7 +287,9 @@ function TripleBuyColumn() {
 function UpcomingDividendColumn() {
   const { data, error } = useSWR<UpcomingDividend[]>(
     '/api/dividend?mode=upcoming',
-    fetcher
+    fetcher,{
+      shouldRetryOnError: false
+    }
   );
 
   return (
