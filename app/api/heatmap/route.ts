@@ -133,7 +133,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
-    console.error('[heatmap] Unexpected error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  console.error('[heatmap] Unexpected error:', err);
+  return NextResponse.json({
+    data: {
+      marketSummary: { up_count: 0, down_count: 0, flat_count: 0, total_volume: 0 },
+      sectors: [],
+    }
+  });
   }
 }
