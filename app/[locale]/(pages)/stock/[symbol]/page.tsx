@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatChange, formatNTD } from '@/lib/utils';
 import type { StockDetailPayload } from '@/types';
-
+import { ShareholdersTab } from '@/components/ShareholdersTab';
 const fetcher = (url: string) =>
   fetch(url).then(r => {
     if (!r.ok) throw new Error(String(r.status));
@@ -89,6 +89,7 @@ export default function StockPage() {
     { label: '基本面',   value: 'fundamentals' },
     { label: '配息紀錄', value: 'dividends'    },
     { label: '供應鏈',   value: 'supply'       },
+    { label: '大股東',   value: 'shareholders' },
   ];
 
   return (
@@ -327,6 +328,10 @@ export default function StockPage() {
                   查看完整供應鏈圖 →
                 </Link>
               </div>
+            )}
+          {/* ── 大股東 ───────────────────────────────────────────────── */}
+            {activeTab === 'shareholders' && (
+              <ShareholdersTab symbol={symbol} />
             )}
           </div>
         </Card>

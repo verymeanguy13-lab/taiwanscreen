@@ -247,3 +247,178 @@ function convertROCDate(rocDate: string): string {
   const westernYear = parseInt(rocYear, 10) + 1911;
   return `${westernYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
+
+// -----------------------------------------------------------------------------
+// 3. fetchMajorShareholders
+// -----------------------------------------------------------------------------
+
+export async function fetchMajorShareholders(
+  symbol: string,
+  year: number,
+  quarter: number,
+): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number }[]> {
+  try {
+    const rocYear = toROCYear(year);
+    const raw = await mopsFetch('/mops/web/ajax_t04st04', {
+      year:    String(rocYear),
+      season:  String(quarter),
+      co_id:   symbol,
+      TYPEK:   'sii',
+    });
+
+    if (!raw) return [];
+
+    const html = extractHTML(raw);
+    const rows = parseHTMLTable(html);
+
+    const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number }[] = [];
+
+    for (const row of rows) {
+      const holder_name = row[0]?.trim();
+      if (!holder_name || holder_name === '股東名稱' || holder_name === '姓名') continue;
+
+      const shares_held  = parseInt((row[2] ?? '0').replace(/,/g, ''), 10) || 0;
+      const holding_pct  = parseFloat((row[3] ?? '0').replace(/,/g, '')) || 0;
+
+      results.push({
+        holder_name,
+        holder_type: 'major_10pct',
+        shares_held,
+        holding_pct,
+      });
+    }
+
+    return results;
+  } catch (err) {
+    console.error('[fetchMajorShareholders] Unexpected error:', err);
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 4. fetchDirectorHoldings
+// -----------------------------------------------------------------------------
+
+export async function fetchDirectorHoldings(
+  symbol: string,
+): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[]> {
+  try {
+    const raw = await mopsFetch('/mops/web/ajax_t09se03', {
+      co_id: symbol,
+      TYPEK: 'sii',
+    });
+
+    if (!raw) return [];
+
+    const html = extractHTML(raw);
+    const rows = parseHTMLTable(html);
+
+    const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[] = [];
+
+    for (const row of rows) {
+      const holder_name = row[0]?.trim();
+      if (!holder_name || holder_name === '姓名' || holder_name === '職稱') continue;
+
+      // Typical columns: 姓名, 職稱, 持有股數, 持股比例(%), 較上月增減
+      const raw_type     = row[1]?.trim() ?? '';
+      const holder_type  = raw_type.includes('監') ? 'supervisor' : 'director';
+      const shares_held  = parseInt((row[2] ?? '0').replace(/,/g, ''), 10) || 0;
+      const holding_pct  = parseFloat((row[3] ?? '0').replace(/,/g, '')) || 0;
+      const change_shares = parseInt((row[4] ?? '0').replace(/,/g, ''), 10) || 0;
+
+      results.push({ holder_name, holder_type, shares_held, holding_pct, change_shares });
+    }
+
+    return results;
+  } catch (err) {
+    console.error('[fetchDirectorHoldings] Unexpected error:', err);
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 3. fetchMajorShareholders
+// -----------------------------------------------------------------------------
+
+export async function fetchMajorShareholders(
+  symbol: string,
+  year: number,
+  quarter: number,
+): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number }[]> {
+  try {
+    const rocYear = toROCYear(year);
+    const raw = await mopsFetch('/mops/web/ajax_t04st04', {
+      year:    String(rocYear),
+      season:  String(quarter),
+      co_id:   symbol,
+      TYPEK:   'sii',
+    });
+
+    if (!raw) return [];
+
+    const html = extractHTML(raw);
+    const rows = parseHTMLTable(html);
+
+    const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number }[] = [];
+
+    for (const row of rows) {
+      const holder_name = row[0]?.trim();
+      if (!holder_name || holder_name === '股東名稱' || holder_name === '姓名') continue;
+
+      const shares_held  = parseInt((row[2] ?? '0').replace(/,/g, ''), 10) || 0;
+      const holding_pct  = parseFloat((row[3] ?? '0').replace(/,/g, '')) || 0;
+
+      results.push({
+        holder_name,
+        holder_type: 'major_10pct',
+        shares_held,
+        holding_pct,
+      });
+    }
+
+    return results;
+  } catch (err) {
+    console.error('[fetchMajorShareholders] Unexpected error:', err);
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 4. fetchDirectorHoldings
+// -----------------------------------------------------------------------------
+
+export async function fetchDirectorHoldings(
+  symbol: string,
+): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[]> {
+  try {
+    const raw = await mopsFetch('/mops/web/ajax_t09se03', {
+      co_id: symbol,
+      TYPEK: 'sii',
+    });
+
+    if (!raw) return [];
+
+    const html = extractHTML(raw);
+    const rows = parseHTMLTable(html);
+
+    const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[] = [];
+
+    for (const row of rows) {
+      const holder_name = row[0]?.trim();
+      if (!holder_name || holder_name === '姓名' || holder_name === '職稱') continue;
+
+      const raw_type      = row[1]?.trim() ?? '';
+      const holder_type   = raw_type.includes('監') ? 'supervisor' : 'director';
+      const shares_held   = parseInt((row[2] ?? '0').replace(/,/g, ''), 10) || 0;
+      const holding_pct   = parseFloat((row[3] ?? '0').replace(/,/g, '')) || 0;
+      const change_shares = parseInt((row[4] ?? '0').replace(/,/g, ''), 10) || 0;
+
+      results.push({ holder_name, holder_type, shares_held, holding_pct, change_shares });
+    }
+
+    return results;
+  } catch (err) {
+    console.error('[fetchDirectorHoldings] Unexpected error:', err);
+    return [];
+  }
+}
