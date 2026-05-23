@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { RevenueChart } from '@/components/charts/RevenueChart';
+import { EPSChart } from '@/components/charts/EPSChart';
 import { Tabs } from '@/components/ui/Tabs';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
@@ -12,6 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { formatChange, formatNTD } from '@/lib/utils';
 import type { StockDetailPayload } from '@/types';
 import { ShareholdersTab } from '@/components/ShareholdersTab';
+
 const fetcher = (url: string) =>
   fetch(url).then(r => {
     if (!r.ok) throw new Error(String(r.status));
@@ -39,6 +42,13 @@ function fmt(v: number | undefined | null, decimals = 2) {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+function marginColor(v: number | undefined | null): string {
+  if (v == null) return 'var(--text-secondary)';
+  if (v > 30)   return 'var(--accent-green)';
+  if (v > 15)   return 'var(--accent-gold)';
+  return 'var(--accent-red)';
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -78,12 +88,12 @@ export default function StockPage() {
   const { info, quote, fundamentals, priceHistory, dividendHistory, dividendSummary, supplyChain } = payload;
 
   // Compute 52-week high/low from price history
-  const closes   = priceHistory.map(p => p.close).filter(Boolean) as number[];
-  const high52w  = closes.length ? Math.max(...closes) : null;
-  const low52w   = closes.length ? Math.min(...closes) : null;
+  const closes  = priceHistory.map(p => p.close).filter(Boolean) as number[];
+  const high52w = closes.length ? Math.max(...closes) : null;
+  const low52w  = closes.length ? Math.min(...closes) : null;
 
-  const change   = formatChange(quote?.change_pct ?? 0);
-  const fund     = fundamentals[0]; // latest period
+  const change = formatChange(quote?.change_pct ?? 0);
+  const fund   = fundamentals[0]; // latest period
 
   const TABS = [
     { label: '基本面',   value: 'fundamentals' },
@@ -148,14 +158,14 @@ export default function StockPage() {
 
         {/* ── KEY METRICS ────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Metric label="本益比"   value={fmt(fund?.pe_ratio,  1)} />
+          <Metric label="本益比"    value={fmt(fund?.pe_ratio, 1)} />
           <Metric label="股價淨值比" value={fmt(fund?.pb_ratio, 2)} />
-          <Metric label="殖利率"   value={dividendSummary?.latest_yield_pct != null ? `${fmt(dividendSummary.latest_yield_pct)}%` : '—'} />
-          <Metric label="ROE"      value={fund?.roe != null ? `${fmt(fund.roe, 1)}%` : '—'} />
-          <Metric label="EPS"      value={fund?.eps != null ? `NT$${fmt(fund.eps)}` : '—'} />
-          <Metric label="毛利率"   value={fund?.gross_margin != null ? `${fmt(fund.gross_margin, 1)}%` : '—'} />
-          <Metric label="負債比"   value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
-          <Metric label="市值"     value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
+          <Metric label="殖利率"    value={dividendSummary?.latest_yield_pct != null ? `${fmt(dividendSummary.latest_yield_pct)}%` : '—'} />
+          <Metric label="ROE"       value={fund?.roe != null ? `${fmt(fund.roe, 1)}%` : '—'} />
+          <Metric label="EPS"       value={fund?.eps != null ? `NT$${fmt(fund.eps)}` : '—'} />
+          <Metric label="毛利率"    value={fund?.gross_margin != null ? `${fmt(fund.gross_margin, 1)}%` : '—'} />
+          <Metric label="負債比"    value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
+          <Metric label="市值"      value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
         </div>
 
         {/* ── TABS ───────────────────────────────────────────────────────── */}
@@ -165,46 +175,63 @@ export default function StockPage() {
           </div>
 
           <div className="px-4 py-4">
+
             {/* ── 基本面 ──────────────────────────────────────────────── */}
             {activeTab === 'fundamentals' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs" style={{ minWidth: 500 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      {['期間', '營收', '淨利', '毛利率', 'ROE', 'EPS'].map(h => (
-                        <th key={h} className="pb-2 text-left font-semibold"
-                          style={{ color: 'var(--text-muted)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fundamentals.slice(0, 8).map(f => (
-                      <tr key={f.period}
-                        style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>{f.period}</td>
-                        <td className="num py-2 pr-4" style={{ color: 'var(--text-primary)' }}>
-                          {f.revenue ? formatNTD(f.revenue) : '—'}
-                        </td>
-                        <td className="num py-2 pr-4" style={{ color: 'var(--text-primary)' }}>
-                          {f.net_income ? formatNTD(f.net_income) : '—'}
-                        </td>
-                        <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>
-                          {f.gross_margin != null ? `${fmt(f.gross_margin, 1)}%` : '—'}
-                        </td>
-                        <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>
-                          {f.roe != null ? `${fmt(f.roe, 1)}%` : '—'}
-                        </td>
-                        <td className="num py-2" style={{ color: 'var(--text-primary)' }}>
-                          {f.eps != null ? `${fmt(f.eps)}` : '—'}
-                        </td>
+              <div className="flex flex-col gap-6">
+
+                {/* Revenue Chart */}
+                <RevenueChart
+                  data={fundamentals.slice(0, 8).reverse().map(f => ({
+                    period:     f.period,
+                    revenue:    f.revenue ?? 0,
+                    growth_yoy: f.revenue_growth_yoy ?? 0,
+                  }))}
+                />
+
+                {/* EPS Chart */}
+                <EPSChart
+                  data={fundamentals.slice(0, 8).reverse().map(f => ({
+                    period: f.period,
+                    eps:    f.eps ?? 0,
+                  }))}
+                />
+
+                {/* Margins Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs" style={{ minWidth: 400 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        {['期間', '毛利率', '營業利益率', '淨利率'].map(h => (
+                          <th key={h} className="pb-2 text-left font-semibold"
+                            style={{ color: 'var(--text-muted)' }}>{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                    {fundamentals.length === 0 && (
-                      <tr><td colSpan={6} className="py-6 text-center"
-                        style={{ color: 'var(--text-muted)' }}>暫無資料</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {fundamentals.slice(0, 8).map(f => (
+                        <tr key={f.period} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>
+                            {f.period}
+                          </td>
+                          <td className="num py-2 pr-4" style={{ color: marginColor(f.gross_margin) }}>
+                            {f.gross_margin != null ? `${fmt(f.gross_margin, 1)}%` : '—'}
+                          </td>
+                          <td className="num py-2 pr-4" style={{ color: marginColor((f as any).operating_margin) }}>
+                            {(f as any).operating_margin != null ? `${fmt((f as any).operating_margin, 1)}%` : '—'}
+                          </td>
+                          <td className="num py-2" style={{ color: marginColor(f.net_margin) }}>
+                            {f.net_margin != null ? `${fmt(f.net_margin, 1)}%` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                      {fundamentals.length === 0 && (
+                        <tr><td colSpan={4} className="py-6 text-center"
+                          style={{ color: 'var(--text-muted)' }}>暫無資料</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -329,10 +356,12 @@ export default function StockPage() {
                 </Link>
               </div>
             )}
-          {/* ── 大股東 ───────────────────────────────────────────────── */}
+
+            {/* ── 大股東 ───────────────────────────────────────────────── */}
             {activeTab === 'shareholders' && (
               <ShareholdersTab symbol={symbol} />
             )}
+
           </div>
         </Card>
       </div>
