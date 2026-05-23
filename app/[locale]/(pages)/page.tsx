@@ -100,55 +100,46 @@ const FEATURES = [
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function LiveMarketBar() {
-  const { data, error } = useSWR<MarketSummary>(
-    '/api/heatmap?mode=market_summary',
+  const { data, error } = useSWR(
+    '/api/heatmap',
     fetcher,
     { refreshInterval: 60_000 }
   );
 
-  if (error || !data) {
+  const summary = data?.data?.marketSummary;
+
+  if (error || !summary) {
     return (
-      <div
-        className="w-full py-2 text-center text-xs"
-        style={{ color: 'var(--text-muted, var(--text-secondary))' }}
-      >
+      <div className="w-full py-2 text-center text-xs"
+        style={{ color: 'var(--text-secondary)' }}>
         {error ? '市場資料載入失敗' : '載入中…'}
       </div>
     );
   }
 
   const items = [
-    { label: '上漲', value: `${data.up}家`, color: 'var(--accent-green)' },
-    { label: '下跌', value: `${data.down}家`, color: 'var(--accent-red, #ef4444)' },
-    { label: '平盤', value: `${data.flat}家`, color: 'var(--text-secondary)' },
-    {
-      label: '成交量',
-      value: `${(data.volume / 10_000).toFixed(1)}萬張`,
-      color: 'var(--accent-blue)',
-    },
+    { label: '上漲', value: `${summary.up_count}家`,   color: 'var(--accent-green)' },
+    { label: '下跌', value: `${summary.down_count}家`, color: 'var(--accent-red)'   },
+    { label: '平盤', value: `${summary.flat_count}家`, color: 'var(--text-secondary)' },
+    { label: '成交量', value: `${(summary.total_volume / 10_000).toFixed(1)}萬張`, color: 'var(--accent-blue)' },
   ];
 
   return (
-    <div
-      className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 py-2 text-sm"
+    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 py-2 text-sm"
       style={{
         backgroundColor: 'var(--bg-secondary)',
         borderTop: '1px solid var(--border)',
         borderBottom: '1px solid var(--border)',
-      }}
-    >
+      }}>
       {items.map(({ label, value, color }, i) => (
         <span key={i} className="flex items-center gap-1">
           <span style={{ color: 'var(--text-secondary)' }}>{label}:</span>
-          <span className="font-semibold tabular-nums" style={{ color }}>
-            {value}
-          </span>
+          <span className="font-semibold tabular-nums" style={{ color }}>{value}</span>
         </span>
       ))}
     </div>
   );
 }
-
 function FeatureCard({
   icon,
   title,
