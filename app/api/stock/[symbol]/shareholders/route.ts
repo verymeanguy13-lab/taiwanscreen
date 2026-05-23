@@ -20,9 +20,9 @@ interface ShareholderRow {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { symbol: string } },
+  { params }: { params: Promise<{ symbol: string }> },
 ) {
-  const { symbol } = params;
+  const { symbol } = await params;
   const cacheKey = `shareholders:${symbol}`;
 
   try {
