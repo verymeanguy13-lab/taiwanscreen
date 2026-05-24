@@ -23,6 +23,7 @@ interface HeatMapProps {
   sizeBy:          'market_cap' | 'volume';
   containerWidth:  number;
   containerHeight: number;
+  containerRef?:   React.RefObject<HTMLDivElement>;
 }
 
 interface Tooltip {
@@ -44,23 +45,20 @@ export function changeToColor(pct: number): string {
 }
 
 function textColor(pct: number): string {
-  // Dark bg (deep green/red) → light text; light bg → dark text
   if (pct >= 0 && pct < 2) return '#003322';
   return '#FFFFFF';
 }
 
 // ── Sector label height ───────────────────────────────────────────────────────
-const LABEL_H  = 18; // px reserved at top of each sector for its name
-const PADDING  = 2;  // gap between sectors
+const LABEL_H  = 18;
+const PADDING  = 2;
 
-export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight }: HeatMapProps) {
+export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight, containerRef }: HeatMapProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
 
-  // Build flat item list with sector information, sized by chosen metric
   const sectorLayouts = useMemo(() => {
     if (containerWidth <= 0 || containerHeight <= 0) return [];
 
-    // Compute total value for the whole map
     const sectorTotals = sectors.map(sec => ({
       ...sec,
       total: sec.stocks.reduce((s, st) => {
@@ -72,7 +70,6 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight }: He
     const grandTotal = sectorTotals.reduce((s, sec) => s + sec.total, 0);
     if (grandTotal === 0) return [];
 
-    // Squarify sectors across the full canvas
     const sectorItems = sectorTotals.map(s => ({
       symbol:     s.name,
       name_zh:    s.name,
@@ -83,12 +80,10 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight }: He
     const outerBounds: Bounds = { x: 0, y: 0, w: containerWidth, h: containerHeight };
     const sectorRects = squarify(sectorItems, outerBounds);
 
-    // For each sector, squarify its stocks within the sector rect
     return sectorRects.map((sr, idx) => {
       const sector = sectorTotals[idx];
       if (!sector) return null;
 
-      // Reserve top of rect for sector label
       const stockBounds: Bounds = {
         x: sr.x + PADDING,
         y: sr.y + LABEL_H,
@@ -116,7 +111,7 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight }: He
   if (containerWidth <= 0 || containerHeight <= 0) return null;
 
   return (
-    <div className="relative w-full" style={{ height: containerHeight }}>
+    <div ref={containerRef} className="relative w-full" style={{ height: containerHeight }}>
       <svg
         width={containerWidth}
         height={containerHeight}
@@ -147,8 +142,8 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight }: He
 
             {/* Stock rects */}
             {stockRects.map(rect => {
-              const pct   = rect.change_pct ?? 0;
-              const fill  = changeToColor(pct);
+              const pct    = rect.change_pct ?? 0;
+              const fill   = changeToColor(pct);
               const tColor = textColor(pct);
               const showSymbol = rect.w >= 35;
               const showPct    = rect.h >= 25;
