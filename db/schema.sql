@@ -241,3 +241,17 @@ CREATE INDEX idx_dividend_summary_yield
 CREATE INDEX idx_supply_chain_ecosystem
   ON supply_chain (ecosystem);
   
+CREATE TABLE IF NOT EXISTS major_shareholders (
+  symbol        VARCHAR(10) REFERENCES stocks(symbol),
+  period        VARCHAR(10),
+  rank          INT,
+  holder_name   VARCHAR(200),
+  holder_type   VARCHAR(50),
+  shares_held   BIGINT,
+  holding_pct   DECIMAL(6,2),
+  change_shares BIGINT,
+  PRIMARY KEY (symbol, period, rank)
+);
+
+CREATE INDEX IF NOT EXISTS idx_major_shareholders_symbol
+  ON major_shareholders(symbol, period DESC);

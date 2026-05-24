@@ -147,10 +147,21 @@ export default function StockPage() {
             <span>市值：<span className="num">{fund?.market_cap ? formatNTD(fund.market_cap) : '—'}</span></span>
           </div>
 
-          {/* Row 4: badges */}
-          <div className="flex gap-2">
+          {/* Row 4: badges + compare link */}
+          <div className="flex flex-wrap items-center gap-2">
             {info.sector && <Badge variant="blue">{info.sector}</Badge>}
             <Badge variant={info.market === 'TWSE' ? 'green' : 'gold'}>{info.market}</Badge>
+            <Link
+              href={`/compare?symbols=${symbol}`}
+              className="rounded-full px-3 py-0.5 text-xs font-medium transition-colors duration-150"
+              style={{
+                backgroundColor: 'rgba(0,212,170,0.08)',
+                color: 'var(--accent-green)',
+                border: '1px solid rgba(0,212,170,0.3)',
+              }}
+            >
+              + 加入比較
+            </Link>
           </div>
         </div>
 
