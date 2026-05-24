@@ -23,7 +23,7 @@ interface HeatMapProps {
   sizeBy:          'market_cap' | 'volume';
   containerWidth:  number;
   containerHeight: number;
-  containerRef?:   React.RefObject<HTMLDivElement>;
+  containerRef?:   React.RefObject<HTMLDivElement | null>;
 }
 
 interface Tooltip {

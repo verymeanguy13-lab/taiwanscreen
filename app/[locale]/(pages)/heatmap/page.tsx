@@ -103,7 +103,7 @@ export default function HeatmapPage() {
   const [toastMsg,      setToastMsg]     = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const heatmapRef   = useRef<HTMLDivElement>(null);
+  const heatmapRef   = useRef<HTMLDivElement | null>(null);
 
   // Measure container with ResizeObserver
   useEffect(() => {
