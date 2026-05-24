@@ -95,15 +95,15 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function HeatmapPage() {
-  const [market,       setMarket]      = useState<'all' | 'TWSE' | 'TPEx'>('all');
-  const [sizeBy,       setSizeBy]      = useState<'market_cap' | 'volume'>('market_cap');
-  const [dims,         setDims]        = useState({ w: 0, h: 0 });
-  const [saving,       setSaving]      = useState(false);
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastMsg,     setToastMsg]    = useState('');
+  const [market,        setMarket]       = useState<'all' | 'TWSE' | 'TPEx'>('all');
+  const [sizeBy,        setSizeBy]       = useState<'market_cap' | 'volume'>('market_cap');
+  const [dims,          setDims]         = useState({ w: 0, h: 0 });
+  const [saving,        setSaving]       = useState(false);
+  const [toastVisible,  setToastVisible] = useState(false);
+  const [toastMsg,      setToastMsg]     = useState('');
 
-  const containerRef  = useRef<HTMLDivElement>(null);
-  const heatmapRef    = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const heatmapRef   = useRef<HTMLDivElement>(null);
 
   // Measure container with ResizeObserver
   useEffect(() => {
@@ -145,10 +145,10 @@ export default function HeatmapPage() {
       const html2canvas = (await import('html2canvas')).default;
       const today = new Date().toISOString().slice(0, 10);
       const canvas = await html2canvas(heatmapRef.current, {
-        backgroundColor: '#08090E',
+        background: '#08090E',
         scale: 2,
         logging: false,
-      });
+      } as Parameters<typeof html2canvas>[1]);
       const link = document.createElement('a');
       link.download = `台股熱力圖_${today}.png`;
       link.href = canvas.toDataURL('image/png');
