@@ -15,7 +15,7 @@ import { formatChange, formatNTD } from '@/lib/utils';
 import type { StockDetailPayload } from '@/types';
 import { ShareholdersTab } from '@/components/ShareholdersTab';
 import { HealthScore } from '@/components/stock/HealthScore';
-
+import { PTTWidget } from '@/components/stock/PTTWidget';
 const fetcher = (url: string) =>
   fetch(url).then(r => {
     if (!r.ok) throw new Error(String(r.status));
