@@ -182,7 +182,8 @@ export default function StockPage() {
           <Metric label="負債比"    value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
           <Metric label="市值"      value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
         </div>
-
+        {/* ── PTT WIDGET ─────────────────────────────────────────────────── */}
+        <PTTWidget symbol={symbol} name_zh={info.name_zh} />
         {/* ── TABS ───────────────────────────────────────────────────────── */}
         <Card className="p-0">
           <div className="px-4 pt-4">
