@@ -48,7 +48,7 @@ export async function GET(
       const brokers = Array.from(brokerSet);
 
       // Group by date → { date, broker1: vol, broker2: vol, ... }
-      const dateMap = new Map<string, Record<string, number>>();
+      const dateMap = new Map<string, Record<string, string | number>>();
       for (const row of rows) {
         const date = row.date.slice(0, 10);
         if (!dateMap.has(date)) dateMap.set(date, { date });
