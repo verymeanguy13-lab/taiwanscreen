@@ -8,12 +8,12 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, ReferenceLine,
-  TooltipProps,
 } from 'recharts';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { BrokerTimelineChart } from '@/components/charts/BrokerTimelineChart';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface InstitutionalFlow {
@@ -31,15 +31,15 @@ interface MarginRow {
 }
 
 interface InstitutionalSummary {
-  foreign_5d:              number;
-  foreign_10d:             number;
-  foreign_20d:             number;
-  trust_5d:                number;
-  trust_10d:               number;
-  trust_20d:               number;
+  foreign_5d:               number;
+  foreign_10d:              number;
+  foreign_20d:              number;
+  trust_5d:                 number;
+  trust_10d:                number;
+  trust_20d:                number;
   foreign_consecutive_days: number;
-  trust_consecutive_days:  number;
-  is_triple_buy:           boolean;
+  trust_consecutive_days:   number;
+  is_triple_buy:            boolean;
 }
 
 interface BrokerRow {
@@ -58,6 +58,11 @@ interface ChipsData {
     buyers:  BrokerRow[];
     sellers: BrokerRow[];
   };
+}
+
+interface BrokerTimelineData {
+  data:    Record<string, string | number>[];
+  brokers: string[];
 }
 
 const fetcher = (url: string) =>
@@ -120,14 +125,50 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Day range pill selector ───────────────────────────────────────────────────
+function DayRangeSelector({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const options = [10, 20, 30];
+  return (
+    <div className="flex gap-1">
+      {options.map(d => (
+        <button
+          key={d}
+          onClick={() => onChange(d)}
+          className="rounded-full px-3 py-1 text-xs font-medium transition-colors duration-100"
+          style={{
+            backgroundColor: value === d ? 'var(--accent-green)' : 'transparent',
+            color: value === d ? 'var(--bg-primary)' : 'var(--text-secondary)',
+            border: value === d ? 'none' : '1px solid var(--border)',
+          }}
+        >
+          {d}日
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ChipsPage() {
   const { symbol } = useParams<{ symbol: string }>();
-  const [brokerTab, setBrokerTab] = useState('buyers');
+  const [brokerTab,    setBrokerTab]    = useState('buyers');
+  const [timelineDays, setTimelineDays] = useState(30);
 
   const { data: res, isLoading } = useSWR(
     symbol ? `/api/stock/${symbol}/chips` : null,
     fetcher,
+  );
+
+  const { data: timelineRes } = useSWR<BrokerTimelineData>(
+    symbol ? `/api/stock/${symbol}/broker-timeline?days=${timelineDays}` : null,
+    fetcher,
+    { shouldRetryOnError: false },
   );
 
   // ── Loading skeleton ───────────────────────────────────────────────────────
@@ -154,25 +195,24 @@ export default function ChipsPage() {
 
   const { institutionalFlows, institutionalSummary: s, marginData, brokerRanking } = chips;
 
-  // Last 60 days of flows
   const flowData60 = institutionalFlows.slice(-60).map(r => ({
-    date:     r.date,
-    外資:     Number(r.foreign_net ?? 0),
-    投信:     Number(r.trust_net   ?? 0),
-    自營商:   Number(r.dealer_net  ?? 0),
+    date:   r.date,
+    外資:   Number(r.foreign_net ?? 0),
+    投信:   Number(r.trust_net   ?? 0),
+    自營商: Number(r.dealer_net  ?? 0),
   }));
 
   const marginData60 = marginData.slice(-60).map(r => ({
-    date:          r.date,
-    融資餘額:      Number(r.margin_balance ?? 0),
-    融券餘額:      Number(r.short_balance  ?? 0),
-    margin_ratio:  Number(r.margin_ratio   ?? 0),
+    date:         r.date,
+    融資餘額:     Number(r.margin_balance ?? 0),
+    融券餘額:     Number(r.short_balance  ?? 0),
+    margin_ratio: Number(r.margin_ratio   ?? 0),
   }));
 
   const latestMarginRatio = marginData60[marginData60.length - 1]?.margin_ratio ?? 0;
 
   const xTickFormatter = (val: string, idx: number) =>
-    idx % 10 === 0 ? val.slice(5) : ''; // show MM-DD every 10th
+    idx % 10 === 0 ? val.slice(5) : '';
 
   const brokerTabOptions = [
     { label: '買超前10名', value: 'buyers'  },
@@ -204,7 +244,6 @@ export default function ChipsPage() {
         <Card>
           <SectionTitle>📊 三大法人買賣超（近60日）</SectionTitle>
 
-          {/* Summary row */}
           <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
             <span style={{ color: 'var(--text-secondary)' }}>
               外資近5日：
@@ -226,7 +265,6 @@ export default function ChipsPage() {
             </span>
           </div>
 
-          {/* Signal badges */}
           <div className="mb-4 flex flex-wrap gap-2">
             {s.foreign_consecutive_days > 0 && (
               <Badge variant="green">外資連買 {s.foreign_consecutive_days} 日</Badge>
@@ -242,7 +280,6 @@ export default function ChipsPage() {
             )}
           </div>
 
-          {/* Stacked bar chart */}
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={flowData60} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} stackOffset="sign">
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -264,8 +301,8 @@ export default function ChipsPage() {
               />
               <ReferenceLine y={0} stroke="var(--border)" />
               <Tooltip content={<InstitutionalTooltip />} />
-              <Bar dataKey="外資"  stackId="a" fill="var(--accent-blue)"   name="外資" />
-              <Bar dataKey="投信"  stackId="a" fill="var(--accent-orange)" name="投信" />
+              <Bar dataKey="外資"   stackId="a" fill="var(--accent-blue)"   name="外資"   />
+              <Bar dataKey="投信"   stackId="a" fill="var(--accent-orange)" name="投信"   />
               <Bar dataKey="自營商" stackId="a" fill="var(--accent-purple)" name="自營商" />
             </BarChart>
           </ResponsiveContainer>
@@ -275,7 +312,6 @@ export default function ChipsPage() {
         <Card>
           <SectionTitle>📉 融資融券餘額（近60日）</SectionTitle>
 
-          {/* 融資使用率 */}
           <div className="mb-4 flex items-center gap-2 text-xs">
             <span style={{ color: 'var(--text-secondary)' }}>融資使用率：</span>
             <span
@@ -299,7 +335,6 @@ export default function ChipsPage() {
                 axisLine={false}
                 tickLine={false}
               />
-              {/* Left Y axis: 融資 (larger scale) */}
               <YAxis
                 yAxisId="margin"
                 orientation="left"
@@ -309,7 +344,6 @@ export default function ChipsPage() {
                 width={64}
                 tickFormatter={v => v >= 10000 ? `${(v / 10000).toFixed(0)}萬` : String(v)}
               />
-              {/* Right Y axis: 融券 (smaller scale) */}
               <YAxis
                 yAxisId="short"
                 orientation="right"
@@ -375,33 +409,25 @@ export default function ChipsPage() {
                   </tr>
                 )}
                 {activeBrokers.map((row, idx) => (
-                  <tr
-                    key={row.broker_id}
-                    style={{ borderBottom: '1px solid var(--border)' }}
-                  >
-                    {/* 排名 */}
+                  <tr key={row.broker_id} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td className="num py-2 pr-4 font-semibold"
                       style={{ color: idx < 3 ? 'var(--accent-gold)' : 'var(--text-muted)' }}>
                       {idx + 1}
                     </td>
-                    {/* 券商名稱 */}
                     <td className="py-2 pr-4" style={{ color: 'var(--text-primary)' }}>
                       {row.broker_name}
                       <span className="ml-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                         ({row.broker_id})
                       </span>
                     </td>
-                    {/* 近5日 */}
                     <td className="num py-2 pr-4 font-semibold"
                       style={{ color: isBuyers ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                       {fmtNet(row.net_5d)}
                     </td>
-                    {/* 近10日 */}
                     <td className="num py-2 pr-4"
                       style={{ color: isBuyers ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                       {fmtNet(row.net_10d)}
                     </td>
-                    {/* 近20日 */}
                     <td className="num py-2"
                       style={{ color: isBuyers ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                       {fmtNet(row.net_20d)}
@@ -411,6 +437,23 @@ export default function ChipsPage() {
               </tbody>
             </table>
           </div>
+        </Card>
+
+        {/* ══ PANEL 4 — 主力進出時序圖 ════════════════════════════════════ */}
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <SectionTitle>🔍 主力券商買賣時序（近{timelineDays}日）</SectionTitle>
+            <DayRangeSelector value={timelineDays} onChange={setTimelineDays} />
+          </div>
+
+          <p className="mb-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+            追蹤特定券商每日買賣動向，觀察主力進出時機。實線為淨買超，虛線為淨賣超。
+          </p>
+
+          <BrokerTimelineChart
+            data={timelineRes?.data ?? []}
+            brokers={timelineRes?.brokers ?? []}
+          />
         </Card>
 
       </div>
