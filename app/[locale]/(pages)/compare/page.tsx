@@ -207,7 +207,7 @@ function PerformanceChart({ stocks }: { stocks: StockData[] }) {
               borderRadius: 8,
               fontSize: 12,
             }}
-            formatter={(value: number) => [`${value.toFixed(1)}`, '']}
+            formatter={(value) => [`${Number(value).toFixed(1)}`, '']}
           />
           <Legend
             formatter={(value) => {
