@@ -84,7 +84,14 @@ export async function GET(req: NextRequest) {
   // Collect all sub-errors
   allErrors.push(...stocks.errors, ...prices.errors, ...institutional.errors, ...margin.errors);
 
-  // ── 5. Return summary ─────────────────────────────────────────────────────
+  // ── 5. Trigger alert checks (after all ingestion is done) ─────────────────
+  // We call /api/cron/alerts internally instead of adding a 3rd Vercel cron
+  // job (Hobby plan only allows 2). This runs once per day after market close.
+  await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/cron/alerts`, {
+    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  }).catch(err => console.error('[daily] alerts cron error:', err));
+
+  // ── 6. Return summary ─────────────────────────────────────────────────────
   console.log(`[cron/daily] Completed for ${taiwanDate}. Total errors: ${allErrors.length}`);
 
   return NextResponse.json({
