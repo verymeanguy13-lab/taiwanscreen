@@ -1,144 +1,150 @@
-// =============================================================================
 // app/api/cron/alerts/route.ts
-// Runs every hour during Taiwan trading hours (9:00–14:00).
-// Schedule: "0 1-6 * * 1-5" in vercel.json
-// =============================================================================
+//
+// Runs every hour during Taiwan trading hours.
+// Called from inside the daily cron (NOT a separate Vercel cron —
+// Hobby plan only supports 2 crons. See vercel.json.)
+//
+// To trigger manually for testing:
+//   curl -H "x-cron-secret: mysecret123" https://taiwanscreen.vercel.app/api/cron/alerts
 
-import { NextRequest, NextResponse } from 'next/server';
-import { queryUnsafe } from '@/lib/db';
-import { sendAlertEmail } from '@/lib/notify';
+import { NextRequest, NextResponse } from 'next/server'
+import { queryUnsafe } from '@/lib/db'
+import { sendAlertEmail } from '@/lib/notify'
 
-interface AlertRow {
-  id:                       number;
-  symbol:                   string;
-  alert_type:               string;
-  threshold:                number;
-  email:                    string;
-  name_zh:                  string;
-  current_price:            number | null;
-  foreign_consecutive_days: number | null;
-  triple_buy:               boolean | null;
-  latest_yield_pct:         number | null;
-}
-
-export async function GET(req: NextRequest) {
-  // ── 1. Validate cron secret ──────────────────────────────────────────────
-  const secret = req.headers.get('x-cron-secret');
+export async function GET(request: NextRequest) {
+  // ─── 1. Validate secret header ───────────────────────────────────────────
+  // Header name: x-cron-secret (lowercase — HTTP headers are case-insensitive
+  // but Next.js normalises them to lowercase)
+  const secret = request.headers.get('x-cron-secret')
   if (secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // ── 2. Check Taiwan trading hours (9:00–14:00, UTC+8) ───────────────────
-  const now         = new Date();
-  const taiwanHour  = (now.getUTCHours() + 8) % 24;
-  if (taiwanHour < 9 || taiwanHour >= 14) {
-    return NextResponse.json({ message: 'Outside trading hours', hour: taiwanHour });
+  // ─── 2. Taiwan time gate ─────────────────────────────────────────────────
+  // Only run during trading hours: Mon–Fri 09:00–14:00 Taiwan time (UTC+8)
+  const taiwanNow = new Date(
+    new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' })
+  )
+  const day  = taiwanNow.getDay()    // 0=Sun, 6=Sat
+  const hour = taiwanNow.getHours()  // 0-23
+
+  if (day === 0 || day === 6) {
+    return NextResponse.json({ message: 'Market closed — weekend' })
+  }
+  if (hour < 9 || hour >= 14) {
+    return NextResponse.json({ message: 'Outside trading hours' })
   }
 
-  // ── 3. Fetch all active alerts with market data ──────────────────────────
-  let alerts: AlertRow[] = [];
-  try {
-    alerts = await queryUnsafe<AlertRow>(
-      `SELECT
-         a.id,
-         a.symbol,
-         a.alert_type,
-         a.threshold,
-         u.email,
-         s.name_zh,
-         dp.close              AS current_price,
-         i.foreign_consecutive_days,
-         i.triple_buy,
-         ds.latest_yield_pct
-       FROM alerts a
-       JOIN users u        ON a.user_id  = u.id
-       JOIN stocks s       ON a.symbol   = s.symbol
-       LEFT JOIN daily_prices dp
-         ON a.symbol = dp.symbol
-         AND dp.date = (SELECT MAX(date) FROM daily_prices)
-       LEFT JOIN institutional_flows i
-         ON a.symbol = i.symbol
-         AND i.date = (SELECT MAX(date) FROM institutional_flows)
-       LEFT JOIN dividend_summary ds
-         ON a.symbol = ds.symbol
-       WHERE a.is_active = TRUE
-         AND (a.last_triggered IS NULL
-              OR a.last_triggered < CURRENT_DATE)`,
-      [],
-    );
-  } catch (err) {
-    console.error('[cron/alerts] Failed to fetch alerts:', err);
-    return NextResponse.json({ error: 'DB error' }, { status: 500 });
+  // ─── 3. Fetch all active alerts ──────────────────────────────────────────
+  type AlertRow = {
+    id: number
+    user_id: number
+    symbol: string
+    alert_type: string
+    threshold: number
+    name_zh: string
+    email: string
+    current_price: number | null
+    foreign_consecutive_days: number | null
+    triple_buy: boolean | null
+    latest_yield_pct: number | null
   }
 
-  // ── 4 & 5. Check conditions and send emails ──────────────────────────────
-  let triggered   = 0;
-  let emails_sent = 0;
+  const alerts = await queryUnsafe<AlertRow>(
+    `SELECT
+       a.id,
+       a.user_id,
+       a.symbol,
+       a.alert_type,
+       a.threshold,
+       s.name_zh,
+       u.email,
+       dp.close                        AS current_price,
+       i.foreign_consecutive_days,
+       i.triple_buy,
+       ds.latest_yield_pct
+     FROM alerts a
+     JOIN users  u  ON a.user_id  = u.id
+     JOIN stocks s  ON a.symbol   = s.symbol
+     LEFT JOIN daily_prices dp
+       ON  a.symbol  = dp.symbol
+       AND dp.date   = (SELECT MAX(date) FROM daily_prices)
+     LEFT JOIN institutional_flows i
+       ON  a.symbol  = i.symbol
+       AND i.date    = (SELECT MAX(date) FROM institutional_flows)
+     LEFT JOIN dividend_summary ds
+       ON  a.symbol  = ds.symbol
+     WHERE a.is_active = TRUE
+       AND (
+         a.last_triggered IS NULL
+         OR a.last_triggered < CURRENT_DATE
+       )`,
+    []
+  )
+
+  // ─── 4 & 5. Check conditions and send emails ─────────────────────────────
+  let triggered = 0
+  let emailsSent = 0
 
   for (const alert of alerts) {
-    const price   = alert.current_price            ?? 0;
-    const streak  = alert.foreign_consecutive_days ?? 0;
-    const triple  = alert.triple_buy               ?? false;
-    const yield_  = alert.latest_yield_pct         ?? 0;
+    const {
+      id, symbol, alert_type, threshold, name_zh, email,
+      current_price, foreign_consecutive_days, triple_buy, latest_yield_pct
+    } = alert
 
-    let conditionMet  = false;
-    let current_value = 0;
+    let conditionMet = false
 
-    switch (alert.alert_type) {
+    switch (alert_type) {
       case 'price_above':
-        conditionMet  = price > alert.threshold;
-        current_value = price;
-        break;
+        conditionMet = current_price != null && current_price > threshold
+        break
       case 'price_below':
-        conditionMet  = price < alert.threshold;
-        current_value = price;
-        break;
+        conditionMet = current_price != null && current_price < threshold
+        break
       case 'triple_buy':
-        conditionMet  = triple;
-        current_value = triple ? 1 : 0;
-        break;
+        conditionMet = triple_buy === true
+        break
       case 'foreign_buy_streak':
-        conditionMet  = streak >= alert.threshold;
-        current_value = streak;
-        break;
+        conditionMet =
+          foreign_consecutive_days != null &&
+          foreign_consecutive_days >= threshold
+        break
       case 'yield_above':
-        conditionMet  = yield_ >= alert.threshold;
-        current_value = yield_;
-        break;
+        conditionMet =
+          latest_yield_pct != null && latest_yield_pct >= threshold
+        break
     }
 
-    if (!conditionMet) continue;
-    triggered++;
+    if (!conditionMet) continue
 
-    // Send email
+    triggered++
+
     const sent = await sendAlertEmail({
-      to:            alert.email,
-      stock_symbol:  alert.symbol,
-      stock_name:    alert.name_zh,
-      alert_type:    alert.alert_type,
-      threshold:     alert.threshold,
-      current_value,
-    });
+      to: email,
+      stock_symbol: symbol,
+      stock_name: name_zh,
+      alert_type,
+      threshold,
+      current_value:
+        alert_type === 'yield_above'
+          ? (latest_yield_pct ?? 0)
+          : alert_type === 'foreign_buy_streak'
+          ? (foreign_consecutive_days ?? 0)
+          : (current_price ?? 0),
+    })
 
-    if (sent) {
-      emails_sent++;
-      // Mark as triggered so it won't fire again today
-      try {
-        await queryUnsafe(
-          `UPDATE alerts SET last_triggered = NOW() WHERE id = $1`,
-          [alert.id],
-        );
-      } catch (err) {
-        console.error(`[cron/alerts] Failed to update last_triggered for alert ${alert.id}:`, err);
-      }
-    }
+    if (sent) emailsSent++
+
+    // Mark alert as triggered today so it doesn't fire again until tomorrow
+    await queryUnsafe(
+      `UPDATE alerts SET last_triggered = NOW() WHERE id = $1`,
+      [id]
+    )
   }
 
-  console.log(`[cron/alerts] Checked ${alerts.length}, triggered ${triggered}, sent ${emails_sent}`);
-
   return NextResponse.json({
-    checked:     alerts.length,
+    checked:      alerts.length,
     triggered,
-    emails_sent,
-  });
+    emails_sent:  emailsSent,
+  })
 }
