@@ -16,6 +16,7 @@ const NAV_LINKS = [
   { key: 'dividend',     href: '/dividend'      },
   { key: 'supplyChain',  href: '/supply-chain'  },
   { key: 'backtest',     href: '/backtest'      },
+  { key: 'watchlist',    href: '/watchlist'     },
 ];
 
 export default function Navbar() {
@@ -24,7 +25,6 @@ export default function Navbar() {
   const router   = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Detect current locale from pathname prefix
   const currentLocale = pathname.startsWith('/en') ? 'en' : 'zh';
 
   const handleLangToggle = () => {

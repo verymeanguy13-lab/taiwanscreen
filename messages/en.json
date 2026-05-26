@@ -9,6 +9,7 @@
     "dividend":      "Dividends",
     "supplyChain":   "Supply Chain",
     "backtest":      "Backtest",
+    "watchlist":     "Watchlist",
     "login":         "Login"
   },
   "screener": {

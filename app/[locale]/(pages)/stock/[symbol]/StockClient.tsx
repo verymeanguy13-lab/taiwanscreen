@@ -16,6 +16,7 @@ import type { StockDetailPayload } from '@/types';
 import { ShareholdersTab } from '@/components/ShareholdersTab';
 import { HealthScore } from '@/components/stock/HealthScore';
 import { PTTWidget } from '@/components/stock/PTTWidget';
+import WatchlistButton from '@/components/stock/WatchlistButton';
 import AdSlot from '@/components/ads/AdSlot';
 
 const fetcher = (url: string) =>
@@ -105,10 +106,8 @@ export default function StockClient() {
   ];
 
   return (
-    <div
-      className="min-h-screen"
-      style={{ backgroundColor: 'var(--bg-primary)' }}
-    >
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+
       {/* ── Outer flex: main content + sidebar ad ──────────────────────── */}
       <div className="mx-auto max-w-screen-xl px-4 py-6 flex gap-6 items-start">
 
@@ -117,6 +116,8 @@ export default function StockClient() {
 
           {/* ── HEADER ───────────────────────────────────────────────── */}
           <div className="flex flex-col gap-2">
+
+            {/* Row 1: symbol + name + watchlist button */}
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="num text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
                 {info.symbol}
@@ -124,8 +125,11 @@ export default function StockClient() {
               <span className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
                 {info.name_zh}
               </span>
+              {/* ★ Watchlist button — sits next to the stock name */}
+              <WatchlistButton symbol={symbol} />
             </div>
 
+            {/* Row 2: price + change */}
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="num text-2xl font-semibold" style={{ color: 'var(--text-primary)' }}>
                 NT${fmt(quote?.close)}
@@ -139,16 +143,15 @@ export default function StockClient() {
               )}
             </div>
 
-            <div
-              className="flex flex-wrap gap-x-4 gap-y-1 text-xs"
-              style={{ color: 'var(--text-secondary)' }}
-            >
+            {/* Row 3: stats */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
               <span>成交量：<span className="num">{quote?.volume?.toLocaleString('en-US') ?? '—'}</span> 張</span>
               <span>52週高：<span className="num" style={{ color: 'var(--accent-green)' }}>{high52w ? fmt(high52w) : '—'}</span></span>
               <span>52週低：<span className="num" style={{ color: 'var(--accent-red)' }}>{low52w ? fmt(low52w) : '—'}</span></span>
               <span>市值：<span className="num">{fund?.market_cap ? formatNTD(fund.market_cap) : '—'}</span></span>
             </div>
 
+            {/* Row 4: badges + compare link */}
             <div className="flex flex-wrap items-center gap-2">
               {info.sector && <Badge variant="blue">{info.sector}</Badge>}
               <Badge variant={info.market === 'TWSE' ? 'green' : 'gold'}>{info.market}</Badge>
@@ -174,14 +177,14 @@ export default function StockClient() {
 
           {/* ── KEY METRICS ──────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Metric label="本益比"    value={fmt(fund?.pe_ratio, 1)} />
+            <Metric label="本益比"     value={fmt(fund?.pe_ratio, 1)} />
             <Metric label="股價淨值比" value={fmt(fund?.pb_ratio, 2)} />
-            <Metric label="殖利率"    value={dividendSummary?.latest_yield_pct != null ? `${fmt(dividendSummary.latest_yield_pct)}%` : '—'} />
-            <Metric label="ROE"       value={fund?.roe != null ? `${fmt(fund.roe, 1)}%` : '—'} />
-            <Metric label="EPS"       value={fund?.eps != null ? `NT$${fmt(fund.eps)}` : '—'} />
-            <Metric label="毛利率"    value={fund?.gross_margin != null ? `${fmt(fund.gross_margin, 1)}%` : '—'} />
-            <Metric label="負債比"    value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
-            <Metric label="市值"      value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
+            <Metric label="殖利率"     value={dividendSummary?.latest_yield_pct != null ? `${fmt(dividendSummary.latest_yield_pct)}%` : '—'} />
+            <Metric label="ROE"        value={fund?.roe != null ? `${fmt(fund.roe, 1)}%` : '—'} />
+            <Metric label="EPS"        value={fund?.eps != null ? `NT$${fmt(fund.eps)}` : '—'} />
+            <Metric label="毛利率"     value={fund?.gross_margin != null ? `${fmt(fund.gross_margin, 1)}%` : '—'} />
+            <Metric label="負債比"     value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
+            <Metric label="市值"       value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
           </div>
 
           {/* ── PTT WIDGET ───────────────────────────────────────────── */}
@@ -223,9 +226,7 @@ export default function StockClient() {
                       <tbody>
                         {fundamentals.slice(0, 8).map(f => (
                           <tr key={f.period} style={{ borderBottom: '1px solid var(--border)' }}>
-                            <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>
-                              {f.period}
-                            </td>
+                            <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>{f.period}</td>
                             <td className="num py-2 pr-4" style={{ color: marginColor(f.gross_margin) }}>
                               {f.gross_margin != null ? `${fmt(f.gross_margin, 1)}%` : '—'}
                             </td>
@@ -238,8 +239,7 @@ export default function StockClient() {
                           </tr>
                         ))}
                         {fundamentals.length === 0 && (
-                          <tr><td colSpan={4} className="py-6 text-center"
-                            style={{ color: 'var(--text-muted)' }}>暫無資料</td></tr>
+                          <tr><td colSpan={4} className="py-6 text-center" style={{ color: 'var(--text-muted)' }}>暫無資料</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -260,11 +260,8 @@ export default function StockClient() {
                     </thead>
                     <tbody>
                       {dividendHistory.map(d => (
-                        <tr key={`${d.year}-${d.period}`}
-                          style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>
-                            {d.year} {d.period}
-                          </td>
+                        <tr key={`${d.year}-${d.period}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className="num py-2 pr-4" style={{ color: 'var(--text-secondary)' }}>{d.year} {d.period}</td>
                           <td className="num py-2 pr-4" style={{ color: 'var(--accent-gold)' }}>
                             {d.cash_dividend != null ? `NT$${fmt(d.cash_dividend, 4)}` : '—'}
                           </td>
@@ -280,8 +277,7 @@ export default function StockClient() {
                         </tr>
                       ))}
                       {dividendHistory.length === 0 && (
-                        <tr><td colSpan={5} className="py-6 text-center"
-                          style={{ color: 'var(--text-muted)' }}>暫無配息紀錄</td></tr>
+                        <tr><td colSpan={5} className="py-6 text-center" style={{ color: 'var(--text-muted)' }}>暫無配息紀錄</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -303,15 +299,9 @@ export default function StockClient() {
                               key={`${sc.child_symbol}-${sc.ecosystem}`}
                               href={`/stock/${sc.child_symbol}`}
                               className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors duration-100"
-                              style={{
-                                backgroundColor: 'var(--bg-secondary)',
-                                border: '1px solid var(--border)',
-                                color: 'var(--text-primary)',
-                              }}
+                              style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                             >
-                              <span className="num font-semibold" style={{ color: 'var(--accent-blue)' }}>
-                                {sc.child_symbol}
-                              </span>
+                              <span className="num font-semibold" style={{ color: 'var(--accent-blue)' }}>{sc.child_symbol}</span>
                               <span>{(sc as any).name_zh}</span>
                               <Badge variant="grey">{(sc as any).sector ?? sc.category}</Badge>
                             </Link>
@@ -320,7 +310,6 @@ export default function StockClient() {
                       )
                     }
                   </div>
-
                   <div>
                     <h3 className="mb-3 text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
                       作為客戶（採購自）
@@ -334,15 +323,9 @@ export default function StockClient() {
                               key={`${sc.parent_symbol}-${sc.ecosystem}`}
                               href={`/stock/${sc.parent_symbol}`}
                               className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors duration-100"
-                              style={{
-                                backgroundColor: 'var(--bg-secondary)',
-                                border: '1px solid var(--border)',
-                                color: 'var(--text-primary)',
-                              }}
+                              style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                             >
-                              <span className="num font-semibold" style={{ color: 'var(--accent-blue)' }}>
-                                {sc.parent_symbol}
-                              </span>
+                              <span className="num font-semibold" style={{ color: 'var(--accent-blue)' }}>{sc.parent_symbol}</span>
                               <span>{(sc as any).name_zh}</span>
                               <Badge variant="grey">{(sc as any).sector ?? sc.category}</Badge>
                             </Link>
@@ -351,12 +334,7 @@ export default function StockClient() {
                       )
                     }
                   </div>
-
-                  <Link
-                    href="/supply-chain"
-                    className="self-start text-xs transition-colors duration-100"
-                    style={{ color: 'var(--accent-blue)' }}
-                  >
+                  <Link href="/supply-chain" className="self-start text-xs transition-colors duration-100" style={{ color: 'var(--accent-blue)' }}>
                     查看完整供應鏈圖 →
                   </Link>
                 </div>
