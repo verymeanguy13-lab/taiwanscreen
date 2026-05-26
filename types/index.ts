@@ -320,3 +320,12 @@ export interface PaginatedResponse<T> {
   page: number;
   per_page: number;
 }
+
+export interface Candle {
+  open:    number;
+  high:    number;
+  low:     number;
+  close:   number;
+  volume?: number;
+  date?:   string;
+}
