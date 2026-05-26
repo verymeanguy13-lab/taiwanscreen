@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# ⚠️ When you get a real domain, replace taiwanscreen.vercel.app below
+Sitemap: https://taiwanscreen.vercel.app/sitemap.xml
