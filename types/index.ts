@@ -329,3 +329,6 @@ export interface Candle {
   volume?: number;
   date?:   string;
 }
+
+export type { RealtimeQuote } from '@/lib/fugle';
+export type { IntradayTick }  from '@/lib/fugle';
