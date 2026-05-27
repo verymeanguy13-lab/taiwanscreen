@@ -299,3 +299,121 @@ export function computeScore(
 }
 
 export const computeHealthScore = computeScore;
+
+// =============================================================================
+// Legacy fundamentals-based health score (used by /api/stock/[symbol]/score)
+// =============================================================================
+
+export interface HealthScoreInput {
+  pe_ratio:                 number | null;
+  pb_ratio:                 number | null;
+  roe:                      number | null;
+  gross_margin:             number | null;
+  revenue_growth_yoy:       number | null;
+  eps_growth_yoy:           number | null;
+  debt_ratio:               number | null;
+  foreign_consecutive_days: number | null;
+  triple_buy:               boolean;
+  latest_yield_pct:         number | null;
+  consecutive_years:        number | null;
+  stability_score:          number | null;
+}
+
+export interface HealthScoreResult {
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D';
+  breakdown: {
+    profitability: number;
+    growth:        number;
+    safety:        number;
+    chips:         number;
+  };
+  strengths: string[];
+  warnings:  string[];
+}
+
+export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
+  const strengths: string[] = [];
+  const warnings:  string[] = [];
+
+  // Profitability (0–100)
+  let profitability = 0;
+  if (input.roe !== null) {
+    if (input.roe >= 20)      { profitability += 40; strengths.push('ROE優異(≥20%)'); }
+    else if (input.roe >= 12) { profitability += 25; }
+    else if (input.roe < 5)   { warnings.push('ROE偏低'); }
+  }
+  if (input.gross_margin !== null) {
+    if (input.gross_margin >= 50)      { profitability += 30; strengths.push('毛利率高(≥50%)'); }
+    else if (input.gross_margin >= 30) { profitability += 18; }
+    else if (input.gross_margin < 15)  { warnings.push('毛利率偏低'); }
+  }
+  if (input.pe_ratio !== null) {
+    if (input.pe_ratio > 0 && input.pe_ratio <= 15)      { profitability += 30; strengths.push('本益比合理'); }
+    else if (input.pe_ratio > 0 && input.pe_ratio <= 25) { profitability += 15; }
+    else if (input.pe_ratio > 40)                        { warnings.push('本益比偏高'); }
+  }
+
+  // Growth (0–100)
+  let growth = 0;
+  if (input.revenue_growth_yoy !== null) {
+    if (input.revenue_growth_yoy >= 20)  { growth += 50; strengths.push('營收高速成長'); }
+    else if (input.revenue_growth_yoy >= 10) { growth += 30; }
+    else if (input.revenue_growth_yoy >= 0)  { growth += 15; }
+    else { warnings.push('營收年減'); }
+  }
+  if (input.eps_growth_yoy !== null) {
+    if (input.eps_growth_yoy >= 20)  { growth += 50; strengths.push('EPS高速成長'); }
+    else if (input.eps_growth_yoy >= 10) { growth += 30; }
+    else if (input.eps_growth_yoy >= 0)  { growth += 15; }
+    else { warnings.push('EPS年減'); }
+  }
+
+  // Safety (0–100)
+  let safety = 0;
+  if (input.debt_ratio !== null) {
+    if (input.debt_ratio <= 30)      { safety += 50; strengths.push('負債比低(≤30%)'); }
+    else if (input.debt_ratio <= 50) { safety += 30; }
+    else if (input.debt_ratio > 70)  { warnings.push('負債比偏高'); }
+  }
+  if (input.pb_ratio !== null) {
+    if (input.pb_ratio > 0 && input.pb_ratio <= 1.5) { safety += 30; strengths.push('股價淨值比低'); }
+    else if (input.pb_ratio > 0 && input.pb_ratio <= 3) { safety += 15; }
+  }
+  if (input.latest_yield_pct !== null && input.latest_yield_pct >= 4) {
+    safety += 20; strengths.push(`殖利率${input.latest_yield_pct.toFixed(1)}%`);
+  }
+  if (input.consecutive_years !== null && input.consecutive_years >= 5) {
+    safety += 20; strengths.push(`連續配息${input.consecutive_years}年`);
+  }
+
+  // Chips (0–100)
+  let chips = 0;
+  if (input.foreign_consecutive_days !== null) {
+    if (input.foreign_consecutive_days >= 5)  { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
+    else if (input.foreign_consecutive_days >= 3) { chips += 30; }
+    else if (input.foreign_consecutive_days <= -3) { warnings.push('外資連賣'); }
+  }
+  if (input.triple_buy) { chips += 50; strengths.push('三大法人同步買超'); }
+
+  // Weighted overall
+  const score = Math.round(
+    profitability * 0.30 +
+    growth        * 0.25 +
+    safety        * 0.25 +
+    chips         * 0.20,
+  );
+
+  const grade: HealthScoreResult['grade'] =
+    score >= 75 ? 'A' :
+    score >= 55 ? 'B' :
+    score >= 35 ? 'C' : 'D';
+
+  return {
+    score: Math.min(100, score),
+    grade,
+    breakdown: { profitability, growth, safety, chips },
+    strengths: strengths.slice(0, 5),
+    warnings:  warnings.slice(0, 3),
+  };
+}
