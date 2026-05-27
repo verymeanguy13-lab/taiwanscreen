@@ -298,7 +298,7 @@ export function computeScore(
   };
 }
 
-export const computeHealthScore = computeScore;
+
 
 // =============================================================================
 // Legacy fundamentals-based health score (used by /api/stock/[symbol]/score)
