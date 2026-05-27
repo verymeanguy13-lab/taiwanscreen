@@ -9,19 +9,24 @@ interface StockMeta {
   name_en: string | null;
 }
 
-export async function generateMetadata({ params }: { params: { symbol: string } }) {
-  const { symbol } = params;
+// Next.js 16: params must be typed as Promise and awaited
+export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
+  const { symbol } = await params;
 
-  const rows = await query<StockMeta>`
-    SELECT name_zh, name_en
-    FROM stocks
-    WHERE symbol = ${symbol}
-    LIMIT 1
-  `;
+  let rows: StockMeta[] = [];
+  try {
+    rows = await query<StockMeta>`
+      SELECT name_zh, name_en
+      FROM stocks
+      WHERE symbol = ${symbol}
+      LIMIT 1
+    `;
+  } catch {
+    // DB error — return fallback title
+  }
 
   const stock = rows[0];
 
-  // If stock not found, return a basic fallback title
   if (!stock) {
     return { title: `${symbol} | 台股雷達` };
   }

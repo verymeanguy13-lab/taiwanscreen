@@ -78,7 +78,7 @@ async function twseFetch<T>(path: string): Promise<T[]> {
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       headers: { 'Accept': 'application/json' },
-      next: { revalidate: 3600 }, // cache for 1 hour (Next.js fetch cache)
+      cache: 'no-store', // always fresh for ingestion
     });
     if (!res.ok) {
       console.error(`[twseFetch] HTTP ${res.status} for ${path}`);
@@ -86,7 +86,7 @@ async function twseFetch<T>(path: string): Promise<T[]> {
     }
     const data = await res.json();
     if (!Array.isArray(data)) {
-      console.error(`[twseFetch] Non-array response for ${path}`);
+      console.error(`[twseFetch] Non-array response for ${path}:`, JSON.stringify(data).slice(0, 200));
       return [];
     }
     return data as T[];
@@ -146,35 +146,58 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
 // -----------------------------------------------------------------------------
 // 2. fetchInstitutionalFlows
 // -----------------------------------------------------------------------------
+// TWSE T86 actual field names (from OpenAPI spec):
+//   證券代號, 證券名稱,
+//   外陸資買進股數, 外陸資賣出股數, 外陸資淨買股數,
+//   外資自營商買進股數, 外資自營商賣出股數, 外資自營商淨買股數,
+//   投信買進股數, 投信賣出股數, 投信淨買股數,
+//   自營商買進股數(自行買賣), 自營商賣出股數(自行買賣), 自營商淨買股數(自行買賣),
+//   自營商買進股數(避險), 自營商賣出股數(避險), 自營商淨買股數(避險),
+//   三大法人買賣超股數
+// -----------------------------------------------------------------------------
 
 export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]> {
   try {
-    type TWSET86 = {
-      '證券代號':       string;
-      '外陸資買進股數': string;
-      '外陸資賣出股數': string;
-      '投信買進股數':   string;
-      '投信賣出股數':   string;
-      '自營商買進股數': string;
-      '自營商賣出股數': string;
-    };
+    // Use Record<string, string> to safely handle all field names including
+    // those with parentheses like '自營商買進股數(自行買賣)'
+    const rows = await twseFetch<Record<string, string>>('/v1/fund/T86');
 
-    const rows = await twseFetch<TWSET86>('/v1/fund/T86');
+    if (rows.length === 0) {
+      console.warn('[fetchInstitutionalFlows] T86 returned 0 rows');
+      return [];
+    }
+
+    // Log first row keys to help debug field name mismatches
+    if (rows[0]) {
+      console.log('[fetchInstitutionalFlows] T86 fields:', Object.keys(rows[0]).join(', '));
+    }
 
     return rows
-      .filter(r => r['證券代號'])
+      .filter(r => r['證券代號'] && r['證券代號'].trim())
       .map(r => {
+        // Foreign (外資及陸資) — use net field directly when available
         const foreign_buy  = parseNum(r['外陸資買進股數']);
         const foreign_sell = parseNum(r['外陸資賣出股數']);
-        const trust_buy    = parseNum(r['投信買進股數']);
-        const trust_sell   = parseNum(r['投信賣出股數']);
-        const dealer_buy   = parseNum(r['自營商買進股數']);
-        const dealer_sell  = parseNum(r['自營商賣出股數']);
+        const foreign_net  = parseNum(r['外陸資淨買股數']) || (foreign_buy - foreign_sell);
 
-        const foreign_net  = foreign_buy  - foreign_sell;
-        const trust_net    = trust_buy    - trust_sell;
-        const dealer_net   = dealer_buy   - dealer_sell;
-        const total_net    = foreign_net  + trust_net + dealer_net;
+        // Trust (投信)
+        const trust_buy  = parseNum(r['投信買進股數']);
+        const trust_sell = parseNum(r['投信賣出股數']);
+        const trust_net  = parseNum(r['投信淨買股數']) || (trust_buy - trust_sell);
+
+        // Dealer (自營商) — sum of proprietary + hedge
+        const dealer_buy_prop  = parseNum(r['自營商買進股數(自行買賣)']);
+        const dealer_sell_prop = parseNum(r['自營商賣出股數(自行買賣)']);
+        const dealer_buy_hedge = parseNum(r['自營商買進股數(避險)']);
+        const dealer_sell_hedge = parseNum(r['自營商賣出股數(避險)']);
+        const dealer_buy  = dealer_buy_prop + dealer_buy_hedge;
+        const dealer_sell = dealer_sell_prop + dealer_sell_hedge;
+        // Try the pre-computed net fields first
+        const dealer_net_raw = parseNum(r['自營商淨買股數(自行買賣)']) + parseNum(r['自營商淨買股數(避險)']);
+        const dealer_net  = dealer_net_raw || (dealer_buy - dealer_sell);
+
+        // Total — try the pre-computed field first
+        const total_net = parseNum(r['三大法人買賣超股數']) || (foreign_net + trust_net + dealer_net);
 
         return {
           symbol: r['證券代號'].trim(),
@@ -298,6 +321,85 @@ export async function fetchETFPrices(): Promise<RawETFData[]> {
       }));
   } catch (err) {
     console.error('[fetchETFPrices] Unexpected error:', err);
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 6. fetchHistoricalPrices — for backfill
+// Fetches one month of OHLCV data for one stock from TWSE
+// endpoint: /exchangeReport/STOCK_DAY?response=json&date=YYYYMMDD&stockNo=SYMBOL
+// -----------------------------------------------------------------------------
+
+export interface RawHistoricalPrice {
+  date:       string; // YYYY-MM-DD
+  open:       number;
+  high:       number;
+  low:        number;
+  close:      number;
+  volume:     number;
+  change_amt: number;
+  change_pct: number;
+}
+
+export async function fetchHistoricalPrices(
+  symbol: string,
+  yyyymm: string, // e.g. "20260401"  — any date in the target month
+): Promise<RawHistoricalPrice[]> {
+  try {
+    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}&stockNo=${symbol}`;
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      console.error(`[fetchHistoricalPrices] HTTP ${res.status} for ${symbol} ${yyyymm}`);
+      return [];
+    }
+    const json = await res.json();
+    if (!json || json.stat !== 'OK' || !Array.isArray(json.data)) {
+      return [];
+    }
+
+    // json.data rows: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌價差, 成交筆數]
+    const results: RawHistoricalPrice[] = [];
+    let prevClose: number | null = null;
+
+    for (const row of json.data) {
+      try {
+        // Date is like "115/04/01" (ROC year) → convert to AD
+        const parts = String(row[0]).split('/');
+        if (parts.length !== 3) continue;
+        const adYear = parseInt(parts[0], 10) + 1911;
+        const dateStr = `${adYear}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+
+        const volume    = parseNum(row[1]);
+        const open      = parseNum(row[3]);
+        const high      = parseNum(row[4]);
+        const low       = parseNum(row[5]);
+        const close     = parseNum(row[6]);
+        const changeRaw = String(row[7]).replace(/,/g, '');
+        // Change field can be "+2.50", "-1.00", "X" (no change indicator for first day)
+        const change_amt = changeRaw.startsWith('+') || changeRaw.startsWith('-')
+          ? parseFloat(changeRaw) || 0
+          : 0;
+        const change_pct = prevClose && prevClose !== 0
+          ? Math.round((change_amt / prevClose) * 10000) / 100
+          : 0;
+
+        prevClose = close;
+
+        if (close > 0) {
+          results.push({ date: dateStr, open, high, low, close, volume, change_amt, change_pct });
+        }
+      } catch {
+        // skip malformed rows
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.error(`[fetchHistoricalPrices] Error for ${symbol}:`, err);
     return [];
   }
 }
