@@ -297,3 +297,5 @@ export function computeScore(
     patterns,
   };
 }
+
+export const computeHealthScore = computeScore;
