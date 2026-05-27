@@ -1,189 +1,299 @@
 // =============================================================================
-// lib/scoring.ts — Stock health score computation
+// lib/scoring.ts — Composite technical score for 台股雷達
+// Weights: trend 25%, momentum 20%, volume 20%, chips 20%, pattern 10%, sentiment 5%
 // =============================================================================
 
-export interface HealthScoreInput {
-  pe_ratio:                 number | null;
-  pb_ratio:                 number | null;
-  roe:                      number | null;
-  gross_margin:             number | null;
-  revenue_growth_yoy:       number | null;
-  eps_growth_yoy:           number | null;
-  debt_ratio:               number | null;
-  foreign_consecutive_days: number | null;
-  triple_buy:               boolean;
-  latest_yield_pct:         number | null;
-  consecutive_years:        number | null;
-  stability_score:          number | null;
+import type { Candle } from '@/types';
+import type { InstitutionalFlow, MarginData } from '@/types';
+import type { DetectedPattern } from '@/lib/patterns';
+import type { BreakoutSignal } from '@/lib/breakouts';
+import type { SignalMatrix } from '@/lib/signals';
+
+import { sma, ema, rsi as calcRsi, macd as calcMacd, kdj, bollingerBands, atr, obv, volumeRatio } from '@/lib/indicators';
+import { detectPatterns } from '@/lib/patterns';
+import { detectAllBreakouts } from '@/lib/breakouts';
+import { evaluateSignalMatrix } from '@/lib/signals';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface DimensionScore {
+  score: number;
+  reason: string;
 }
 
-export interface HealthScoreBreakdown {
-  profitability: number; // 0–25
-  growth:        number; // 0–25
-  safety:        number; // 0–25
-  chips:         number; // 0–25
+export interface ScoreResult {
+  overall: number;
+  technicalReading: '技術面強勢' | '偏多訊號' | '中性' | '偏空訊號' | '技術面弱勢';
+  dimensions: {
+    trend:     DimensionScore;
+    momentum:  DimensionScore;
+    volume:    DimensionScore;
+    chips:     DimensionScore;
+    pattern:   DimensionScore;
+    sentiment: DimensionScore;
+  };
+  breakouts: BreakoutSignal[];
+  matrix:    SignalMatrix;
+  patterns:  DetectedPattern[];
 }
 
-export interface HealthScoreResult {
-  score:     number;
-  grade:     'A' | 'B' | 'C' | 'D';
-  breakdown: HealthScoreBreakdown;
-  strengths: string[];
-  warnings:  string[];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function last<T>(arr: (T | null)[], offset = 0): T | null {
+  const idx = arr.length - 1 - offset;
+  return idx >= 0 ? arr[idx] : null;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+function clamp(v: number, lo = 0, hi = 100): number {
+  return Math.min(hi, Math.max(lo, v));
 }
 
-// ── Main function ─────────────────────────────────────────────────────────────
+function avgVol(candles: Candle[], period = 5, endOffset = 1): number {
+  const end   = candles.length - endOffset;
+  const start = Math.max(0, end - period);
+  const slice = candles.slice(start, end);
+  if (slice.length === 0) return 0;
+  return slice.reduce((s, c) => s + (c.volume ?? 0), 0) / slice.length;
+}
 
-export function computeHealthScore(data: HealthScoreInput): HealthScoreResult {
-  // ── 1. Profitability (0–25) ──────────────────────────────────────────────
-  let profitability = 0;
+// ---------------------------------------------------------------------------
+// computeScore
+// ---------------------------------------------------------------------------
 
-  // ROE
-  if (data.roe != null) {
-    if      (data.roe > 20) profitability += 10;
-    else if (data.roe > 15) profitability += 7;
-    else if (data.roe > 10) profitability += 4;
-    else if (data.roe < 0)  profitability -= 5;
+export function computeScore(
+  candles: Candle[],
+  institutional?: InstitutionalFlow[],
+  margin?: MarginData[],
+): ScoreResult {
+  const n = candles.length;
+
+  // ------------------------------------------------------------------
+  // Build indicators
+  // ------------------------------------------------------------------
+  const closes  = candles.map((c) => c.close);
+  const highs   = candles.map((c) => c.high);
+  const lows    = candles.map((c) => c.low);
+  const volumes = candles.map((c) => c.volume ?? 0);
+
+  const sma5  = sma(closes, 5);
+  const sma20 = sma(closes, 20);
+  const sma60 = sma(closes, 60);
+  const rsi14 = calcRsi(closes, 14);
+  const macdData = calcMacd(closes);
+  const kdjData  = kdj(highs, lows, closes);
+  const bbData   = bollingerBands(closes);
+  const obvData  = obv(candles);
+  const volRatioData = volumeRatio(volumes, 5);
+
+  const indicatorSnapshot = {
+    sma5, sma20, sma60, rsi14,
+    macd: macdData,
+    kd:   { k: kdjData.k, d: kdjData.d },
+    bb:   bbData,
+    obv:  obvData,
+    volRatio: volRatioData,
+  };
+
+  const today    = candles[n - 1] ?? { open: 0, high: 0, low: 0, close: 0 };
+  const m5Now    = last(sma5)  as number | null;
+  const m20Now   = last(sma20) as number | null;
+  const m60Now   = last(sma60) as number | null;
+  const rsiNow   = last(rsi14) as number | null;
+  const macdLine = last(macdData.macdLine)   as number | null;
+  const sigLine  = last(macdData.signalLine) as number | null;
+  const kNow     = last(kdjData.k) as number | null;
+  const dNow     = last(kdjData.d) as number | null;
+
+  // ------------------------------------------------------------------
+  // TREND (0–100, weight 25%)
+  // ------------------------------------------------------------------
+  let trendScore = 0;
+  const trendReasons: string[] = [];
+
+  if (m5Now !== null && today.close > m5Now) { trendScore += 25; trendReasons.push('價>5MA'); }
+  if (m5Now !== null && m20Now !== null && m5Now > m20Now) { trendScore += 25; trendReasons.push('5MA>20MA'); }
+  if (m20Now !== null && m60Now !== null && m20Now > m60Now) { trendScore += 20; trendReasons.push('20MA>60MA'); }
+  if (m60Now !== null && today.close > m60Now) { trendScore += 15; trendReasons.push('價>60MA'); }
+  if (today.close > today.open) { trendScore += 15; trendReasons.push('今日上漲'); }
+
+  // ------------------------------------------------------------------
+  // MOMENTUM (0–100, weight 20%)
+  // ------------------------------------------------------------------
+  let momentumScore = 0;
+  const momReasons: string[] = [];
+
+  // RSI
+  if (rsiNow !== null) {
+    if (rsiNow >= 50 && rsiNow <= 70) { momentumScore += 40; momReasons.push(`RSI ${rsiNow.toFixed(0)}(強勢區)`); }
+    else if (rsiNow > 70)             { momentumScore += 20; momReasons.push(`RSI ${rsiNow.toFixed(0)}(偏高)`); }
+    else if (rsiNow >= 40)            { momentumScore += 10; momReasons.push(`RSI ${rsiNow.toFixed(0)}(中性)`); }
+    else                              { momentumScore -= 20; momReasons.push(`RSI ${rsiNow.toFixed(0)}(弱勢)`); }
   }
 
-  // Gross margin
-  if (data.gross_margin != null) {
-    if      (data.gross_margin > 40) profitability += 8;
-    else if (data.gross_margin > 25) profitability += 5;
-    else if (data.gross_margin > 15) profitability += 2;
+  // MACD
+  if (macdLine !== null && sigLine !== null) {
+    if (macdLine > sigLine && macdLine > 0) { momentumScore += 30; momReasons.push('MACD多頭'); }
+    else if (macdLine > sigLine)            { momentumScore += 15; momReasons.push('MACD金叉'); }
   }
 
-  // Revenue growth (bonus for profitability)
-  if (data.revenue_growth_yoy != null) {
-    if      (data.revenue_growth_yoy > 20) profitability += 7;
-    else if (data.revenue_growth_yoy > 10) profitability += 4;
-    else if (data.revenue_growth_yoy < 0)  profitability -= 3;
+  // KDJ
+  if (kNow !== null && dNow !== null) {
+    if (kNow > dNow && kNow > 50) { momentumScore += 30; momReasons.push(`K(${kNow.toFixed(0)})>D多頭`); }
+    else if (kNow > dNow)         { momentumScore += 15; momReasons.push('KD金叉'); }
   }
 
-  profitability = clamp(profitability, 0, 25);
+  // ------------------------------------------------------------------
+  // VOLUME (0–100, weight 20%)
+  // ------------------------------------------------------------------
+  let volumeScore = 0;
+  const volReasons: string[] = [];
 
-  // ── 2. Growth (0–25) ────────────────────────────────────────────────────
-  let growth = 0;
+  const av5 = avgVol(candles, 5, 1);
+  const todayVol = today.volume ?? 0;
 
-  // Revenue YoY
-  if (data.revenue_growth_yoy != null) {
-    if      (data.revenue_growth_yoy > 20) growth += 10;
-    else if (data.revenue_growth_yoy > 10) growth += 6;
-    else if (data.revenue_growth_yoy > 0)  growth += 3;
-    else                                   growth -= 3;
+  // Volume ratio tiers
+  if (av5 > 0) {
+    const vr = todayVol / av5;
+    if (vr >= 2)       { volumeScore += 40; volReasons.push(`量比${vr.toFixed(1)}x(暴增)`); }
+    else if (vr >= 1.5){ volumeScore += 30; volReasons.push(`量比${vr.toFixed(1)}x(放量)`); }
+    else if (vr >= 1)  { volumeScore += 15; volReasons.push(`量比${vr.toFixed(1)}x(正常)`); }
   }
 
-  // EPS growth
-  if (data.eps_growth_yoy != null) {
-    if      (data.eps_growth_yoy > 20) growth += 10;
-    else if (data.eps_growth_yoy > 10) growth += 6;
-    else if (data.eps_growth_yoy > 0)  growth += 3;
-    else                               growth -= 3;
+  // OBV rising
+  if (obvData.length > 5 && obvData[obvData.length - 1] > obvData[obvData.length - 6]) {
+    volumeScore += 30; volReasons.push('OBV上升');
   }
 
-  growth = clamp(growth, 0, 25);
-
-  // ── 3. Safety (0–25) ────────────────────────────────────────────────────
-  let safety = 0;
-
-  // Debt ratio
-  if (data.debt_ratio != null) {
-    if      (data.debt_ratio < 30) safety += 10;
-    else if (data.debt_ratio < 50) safety += 6;
-    else if (data.debt_ratio > 70) safety -= 5;
+  // Distribution warning: high volume + price drop
+  if (av5 > 0 && todayVol > 1.5 * av5 && today.close < today.open) {
+    volumeScore -= 20; volReasons.push('出貨警告');
   }
 
-  // PE ratio
-  if (data.pe_ratio != null) {
-    if      (data.pe_ratio < 15) safety += 8;
-    else if (data.pe_ratio < 25) safety += 5;
-    else if (data.pe_ratio > 40) safety -= 3;
+  // ------------------------------------------------------------------
+  // CHIPS (0–100, weight 20%)
+  // ------------------------------------------------------------------
+  let chipsScore = 0;
+  const chipsReasons: string[] = [];
+
+  if (institutional && institutional.length >= 3) {
+    const recent3 = institutional.slice(-3);
+    const foreignNet3 = recent3.reduce((s, r) => s + (r.foreign_net ?? 0), 0);
+    const trustNet3   = recent3.reduce((s, r) => s + (r.trust_net ?? 0), 0);
+    const allForeignPos = recent3.every((r) => (r.foreign_net ?? 0) > 0);
+    const allTrustPos   = recent3.every((r) => (r.trust_net ?? 0) > 0);
+
+    if (allForeignPos) { chipsScore += 35; chipsReasons.push(`外資連買3日(+${foreignNet3})`); }
+    if (allTrustPos)   { chipsScore += 20; chipsReasons.push(`投信連買3日(+${trustNet3})`); }
   }
 
-  // PB ratio
-  if (data.pb_ratio != null) {
-    if      (data.pb_ratio < 1.5) safety += 7;
-    else if (data.pb_ratio < 3)   safety += 4;
-    else if (data.pb_ratio > 5)   safety -= 3;
+  if (margin && margin.length >= 2) {
+    const latest = margin[margin.length - 1];
+    const prev   = margin[margin.length - 2];
+    const marginBal = latest.margin_balance ?? 0;
+    const marginPrev = prev.margin_balance ?? 0;
+    const shortBal  = latest.short_balance ?? 0;
+    const shortPrev = prev.short_balance ?? 0;
+
+    if (marginBal < marginPrev) { chipsScore += 20; chipsReasons.push('融資餘額下降(健康)'); }
+    else if (marginBal > marginPrev * 1.05) { chipsScore -= 15; chipsReasons.push('融資快速增加'); }
+
+    if (shortBal > shortPrev * 1.1) { chipsScore += 25; chipsReasons.push('空單增加(軋空潛力)'); }
+    else if (shortBal < shortPrev)  { chipsScore -= 20; chipsReasons.push('空單回補(賣壓)'); }
   }
 
-  safety = clamp(safety, 0, 25);
+  // ------------------------------------------------------------------
+  // PATTERN (0–100, weight 10%)
+  // ------------------------------------------------------------------
+  let patternScore = 0;
+  const patReasons: string[] = [];
 
-  // ── 4. Chips (0–25) ─────────────────────────────────────────────────────
-  let chips = 0;
+  const patterns = detectPatterns(candles);
+  const breakouts = detectAllBreakouts(candles, {
+    sma5, sma20, sma60, rsi14, macd: macdData,
+  });
 
-  // Foreign consecutive days
-  if (data.foreign_consecutive_days != null) {
-    if      (data.foreign_consecutive_days > 10)  chips += 10;
-    else if (data.foreign_consecutive_days > 5)   chips += 7;
-    else if (data.foreign_consecutive_days > 0)   chips += 4;
-    else if (data.foreign_consecutive_days < -5)  chips -= 5;
+  for (const p of patterns) {
+    if (p.type === 'bullish')  { patternScore += p.confidence * 0.5; patReasons.push(`+${p.name}`); }
+    if (p.type === 'bearish')  { patternScore -= p.confidence * 0.4; patReasons.push(`-${p.name}`); }
   }
 
-  // Triple buy
-  if (data.triple_buy) chips += 8;
+  // Breakout bonus
+  const strongBreakout = breakouts.find((b) => b.confidence > 70);
+  if (strongBreakout) { patternScore += 40; patReasons.push(`突破訊號(${strongBreakout.type})`); }
 
-  // Dividend quality
-  if (
-    data.latest_yield_pct != null && data.latest_yield_pct > 4 &&
-    data.consecutive_years != null && data.consecutive_years > 5
-  ) {
-    chips += 7;
+  // Signal matrix strength bonus
+  const matrix = evaluateSignalMatrix(candles, indicatorSnapshot, institutional);
+  if (matrix.strengthCount >= 6) { patternScore += 25; patReasons.push(`強勢指標${matrix.strengthCount}/9`); }
+
+  // ------------------------------------------------------------------
+  // SENTIMENT (0–100, weight 5%)
+  // ------------------------------------------------------------------
+  let sentimentScore = 0;
+  const sentReasons: string[] = [];
+
+  // RSI ideal zone (not overbought/oversold)
+  if (rsiNow !== null) {
+    if (rsiNow >= 40 && rsiNow <= 65)   { sentimentScore += 30; sentReasons.push('RSI健康區'); }
+    else if (rsiNow > 75)               { sentimentScore += 0;  sentReasons.push('RSI過熱'); }
+    else                                { sentimentScore += 20; sentReasons.push('RSI中性'); }
   }
 
-  chips = clamp(chips, 0, 25);
+  // Not overbought (below upper BB)
+  const bbUpper = last(bbData.upper) as number | null;
+  if (bbUpper !== null && today.close <= bbUpper) { sentimentScore += 20; sentReasons.push('未觸布林上軌'); }
 
-  // ── 5. Total score & grade ───────────────────────────────────────────────
-  const score = profitability + growth + safety + chips;
+  // No recent bearish patterns in last 3 candles
+  const recentBear = patterns.filter((p) => p.type === 'bearish' && p.candleIndex >= n - 3);
+  if (recentBear.length === 0) { sentimentScore += 25; sentReasons.push('近期無空頭型態'); }
 
-  let grade: 'A' | 'B' | 'C' | 'D';
-  if      (score >= 80) grade = 'A';
-  else if (score >= 60) grade = 'B';
-  else if (score >= 40) grade = 'C';
-  else                  grade = 'D';
+  // Stable volume (not extreme swings)
+  const vol3    = candles.slice(Math.max(0, n - 3)).map((c) => c.volume ?? 0);
+  const volMean = vol3.reduce((s, v) => s + v, 0) / (vol3.length || 1);
+  const volStd  = Math.sqrt(vol3.reduce((s, v) => s + (v - volMean) ** 2, 0) / (vol3.length || 1));
+  if (volMean > 0 && volStd / volMean < 0.5) { sentimentScore += 25; sentReasons.push('量能穩定'); }
 
-  // ── 6. Strengths & warnings ──────────────────────────────────────────────
-  const strengths: string[] = [];
-  const warnings:  string[] = [];
+  // ------------------------------------------------------------------
+  // Composite score
+  // ------------------------------------------------------------------
+  const trendW     = 0.25;
+  const momentumW  = 0.20;
+  const volumeW    = 0.20;
+  const chipsW     = 0.20;
+  const patternW   = 0.10;
+  const sentimentW = 0.05;
 
-  // Profitability
-  if (profitability > 18) strengths.push('高獲利能力');
-  if (profitability < 8)  warnings.push('獲利能力偏弱');
-  if (data.roe != null && data.roe > 20)          strengths.push('高ROE');
-  if (data.gross_margin != null && data.gross_margin > 40) strengths.push('高毛利率');
+  const overall = Math.round(
+    clamp(trendScore)     * trendW +
+    clamp(momentumScore)  * momentumW +
+    clamp(volumeScore)    * volumeW +
+    clamp(chipsScore)     * chipsW +
+    clamp(patternScore)   * patternW +
+    clamp(sentimentScore) * sentimentW,
+  );
 
-  // Growth
-  if (growth > 18) strengths.push('高成長性');
-  if (growth < 8)  warnings.push('成長動能不足');
-  if (data.revenue_growth_yoy != null && data.revenue_growth_yoy > 20) strengths.push('營收高速成長');
-  if (data.eps_growth_yoy != null && data.eps_growth_yoy > 20)         strengths.push('EPS高速成長');
-  if (data.revenue_growth_yoy != null && data.revenue_growth_yoy < 0)  warnings.push('營收年衰退');
-
-  // Safety
-  if (safety > 18) strengths.push('財務安全');
-  if (safety < 8)  warnings.push('財務風險偏高');
-  if (data.debt_ratio != null && data.debt_ratio < 30) strengths.push('低負債');
-  if (data.debt_ratio != null && data.debt_ratio > 70) warnings.push('高負債比');
-  if (data.pe_ratio != null && data.pe_ratio > 40)     warnings.push('本益比偏高');
-
-  // Chips
-  if (chips > 18) strengths.push('籌碼面強勁');
-  if (chips < 8)  warnings.push('籌碼面偏弱');
-  if (data.foreign_consecutive_days != null && data.foreign_consecutive_days > 5) strengths.push('外資連買');
-  if (data.foreign_consecutive_days != null && data.foreign_consecutive_days < -5) warnings.push('外資連賣');
-  if (data.triple_buy) strengths.push('三買訊號');
+  const technicalReading: ScoreResult['technicalReading'] =
+    overall >= 75 ? '技術面強勢' :
+    overall >= 60 ? '偏多訊號'   :
+    overall >= 40 ? '中性'       :
+    overall >= 25 ? '偏空訊號'   : '技術面弱勢';
 
   return {
-    score,
-    grade,
-    breakdown: { profitability, growth, safety, chips },
-    strengths: [...new Set(strengths)],
-    warnings:  [...new Set(warnings)],
+    overall: clamp(overall),
+    technicalReading,
+    dimensions: {
+      trend:     { score: clamp(trendScore),     reason: trendReasons.join('，') || '趨勢不明' },
+      momentum:  { score: clamp(momentumScore),  reason: momReasons.join('，')   || '動能偏弱' },
+      volume:    { score: clamp(volumeScore),    reason: volReasons.join('，')   || '量能普通' },
+      chips:     { score: clamp(chipsScore),     reason: chipsReasons.join('，') || '籌碼無明顯動向' },
+      pattern:   { score: clamp(patternScore),   reason: patReasons.join('，')   || '無明顯型態' },
+      sentiment: { score: clamp(sentimentScore), reason: sentReasons.join('，')  || '情緒中性' },
+    },
+    breakouts,
+    matrix,
+    patterns,
   };
 }
