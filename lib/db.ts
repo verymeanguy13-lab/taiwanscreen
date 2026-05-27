@@ -20,7 +20,10 @@ export async function queryUnsafe<T>(
   sqlString: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const rows = await sql(sqlString, params);
+  // Build a tagged template call dynamically by splitting on $1, $2, etc.
+  const parts = sqlString.split(/\$\d+/);
+  const strings = Object.assign(parts, { raw: parts }) as TemplateStringsArray;
+  const rows = await sql(strings, ...params);
   return rows as T[];
 }
 
