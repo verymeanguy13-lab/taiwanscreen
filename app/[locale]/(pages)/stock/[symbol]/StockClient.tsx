@@ -20,6 +20,8 @@ import WatchlistButton from '@/components/stock/WatchlistButton';
 import AdSlot from '@/components/ads/AdSlot';
 import { CandlestickChart } from '@/components/kline/CandlestickChart';
 import { ScoreCard }        from '@/components/kline/ScoreCard';
+import { BullBearPanel }    from '@/components/kline/BullBearPanel';
+import { ScoringPanel }     from '@/components/kline/ScoringPanel';
 
 const fetcher = (url: string) =>
   fetch(url).then(r => {
@@ -108,6 +110,8 @@ export default function StockClient() {
   const TABS = [
     { label: '基本面',   value: 'fundamentals' },
     { label: '起漲分析', value: 'kline'        },
+    { label: '多空趨勢', value: 'bullbear'     },
+    { label: '起漲評分', value: 'scoring'      },
     { label: '配息紀錄', value: 'dividends'    },
     { label: '供應鏈',   value: 'supply'       },
     { label: '大股東',   value: 'shareholders' },
@@ -133,7 +137,6 @@ export default function StockClient() {
               <span className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
                 {info.name_zh}
               </span>
-              {/* ★ Watchlist button — sits next to the stock name */}
               <WatchlistButton symbol={symbol} />
             </div>
 
@@ -347,7 +350,8 @@ export default function StockClient() {
                   </Link>
                 </div>
               )}
-             {activeTab === 'kline' && (
+
+              {activeTab === 'kline' && (
                 <div style={{ paddingTop: 8 }}>
                   <CandlestickChart symbol={symbol} />
                   {klineData?.score && (
@@ -355,8 +359,20 @@ export default function StockClient() {
                   )}
                 </div>
               )}
+
+              {activeTab === 'bullbear' && (
+                <div style={{ paddingTop: 8 }}>
+                  <BullBearPanel symbol={symbol} />
+                </div>
+              )}
+
+              {activeTab === 'scoring' && (
+                <div style={{ paddingTop: 8 }}>
+                  <ScoringPanel symbol={symbol} />
+                </div>
+              )}
+
               {activeTab === 'shareholders' && (
-                
                 <ShareholdersTab symbol={symbol} />
               )}
 
