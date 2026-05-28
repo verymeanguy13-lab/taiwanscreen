@@ -222,7 +222,8 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           '箱型整理突破': { color: '#F5B700', text: '箱型↑' },
           '下跌V轉突破':  { color: '#FF4D6D', text: 'V轉↑'  },
         } as const;
-        candleSeries.setMarkers(data.breakouts.map(b => ({
+        const { createSeriesMarkers } = await import('lightweight-charts');
+        createSeriesMarkers(candleSeries, data.breakouts.map(b => ({
           time:     b.date as string,
           position: 'belowBar' as const,
           shape:    'arrowUp' as const,
