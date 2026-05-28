@@ -7,6 +7,7 @@ import { Zap, Menu, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 const NAV_LINKS = [
+  { key: 'dazhang',     href: '/dazhang'      },
   { key: 'screener',     href: '/screener'     },
   { key: 'heatmap',      href: '/heatmap'      },
   { key: 'institutional',href: '/institutional' },
