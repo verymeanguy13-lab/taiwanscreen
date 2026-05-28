@@ -2,7 +2,9 @@
 // lib/db.ts — Neon PostgreSQL client
 // =============================================================================
 
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
+
+neonConfig.fetchConnectionCache = true;
 
 export const sql = neon(process.env.DATABASE_URL!);
 
@@ -15,15 +17,13 @@ export async function query<T>(
   return rows as T[];
 }
 
-// For dynamically built SQL strings
+// For dynamically built SQL strings — uses sql.query() which accepts plain string + params
 export async function queryUnsafe<T>(
   sqlString: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const parts = sqlString.split(/\$\d+/);
-  const strings = Object.assign(parts, { raw: parts }) as TemplateStringsArray;
-  const rows = await sql(strings, ...params);
-  return rows as T[];
+  const rows = await sql.query(sqlString, params);
+  return rows.rows as T[];
 }
 
 // Returns the most recent date in any date-keyed table
