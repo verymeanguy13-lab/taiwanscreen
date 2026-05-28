@@ -2,9 +2,20 @@
 // lib/db.ts — Neon PostgreSQL client
 // =============================================================================
 
-import { neon, neonConfig } from '@neondatabase/serverless';
+import { neon, neonConfig, types } from '@neondatabase/serverless';
 
 neonConfig.fetchConnectionCache = true;
+
+// Tell the Neon driver to return numeric types as JS numbers, not strings
+// OIDs: 700=float4, 701=float8, 1700=numeric, 20=int8, 21=int2, 23=int4
+const parseNumber = (val: string) => parseFloat(val);
+const parseInt_   = (val: string) => parseInt(val, 10);
+types.setTypeParser(700,  parseNumber);
+types.setTypeParser(701,  parseNumber);
+types.setTypeParser(1700, parseNumber);
+types.setTypeParser(20,   parseInt_);
+types.setTypeParser(21,   parseInt_);
+types.setTypeParser(23,   parseInt_);
 
 export const sql = neon(process.env.DATABASE_URL!);
 
