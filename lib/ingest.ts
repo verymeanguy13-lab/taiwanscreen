@@ -9,6 +9,7 @@ import {
   fetchAllStockPrices,
   fetchInstitutionalFlows,
   fetchMarginData,
+  fetchFundamentals,
 } from '@/lib/twse';
 
 type IngestResult = { count: number; errors: string[] };
@@ -136,8 +137,7 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
     }
   }
 
-  // Mark triple_buy for this date
-  console.log(`[ingestInstitutionalFlows] Computing triple_buy for ${date}…`);
+  // Mark triple_buy
   try {
     await queryUnsafe(
       `UPDATE institutional_flows
@@ -151,8 +151,6 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
     errors.push(msg);
   }
 
-  // Compute consecutive days streaks
-  console.log(`[ingestInstitutionalFlows] Computing consecutive days for ${date}…`);
   await computeConsecutiveDays(date);
 
   console.log(`[ingestInstitutionalFlows] Done. Upserted ${count} rows, ${errors.length} errors.`);
@@ -167,17 +165,13 @@ export async function computeConsecutiveDays(date: string): Promise<void> {
   console.log(`[computeConsecutiveDays] Starting for date ${date}…`);
 
   try {
-    // Get all symbols that have a record on this date
     const symbols = await queryUnsafe<{ symbol: string }>(
       `SELECT DISTINCT symbol FROM institutional_flows WHERE date = $1`,
       [date],
     );
 
-    console.log(`[computeConsecutiveDays] Processing ${symbols.length} symbols…`);
-
     for (const { symbol } of symbols) {
       try {
-        // Fetch the last 60 days for this symbol, newest first
         const rows = await queryUnsafe<{
           date: string;
           foreign_net: number;
@@ -185,37 +179,27 @@ export async function computeConsecutiveDays(date: string): Promise<void> {
         }>(
           `SELECT date, foreign_net, trust_net
            FROM institutional_flows
-           WHERE symbol = $1
-             AND date <= $2
-           ORDER BY date DESC
-           LIMIT 60`,
+           WHERE symbol = $1 AND date <= $2
+           ORDER BY date DESC LIMIT 60`,
           [symbol, date],
         );
 
         if (rows.length === 0) continue;
 
-        // Count foreign consecutive days
         let foreignStreak = 0;
         const firstForeignPositive = (rows[0].foreign_net ?? 0) > 0;
         for (const row of rows) {
           const positive = (row.foreign_net ?? 0) > 0;
-          if (positive === firstForeignPositive) {
-            foreignStreak += firstForeignPositive ? 1 : -1;
-          } else {
-            break;
-          }
+          if (positive === firstForeignPositive) foreignStreak += firstForeignPositive ? 1 : -1;
+          else break;
         }
 
-        // Count trust consecutive days
         let trustStreak = 0;
         const firstTrustPositive = (rows[0].trust_net ?? 0) > 0;
         for (const row of rows) {
           const positive = (row.trust_net ?? 0) > 0;
-          if (positive === firstTrustPositive) {
-            trustStreak += firstTrustPositive ? 1 : -1;
-          } else {
-            break;
-          }
+          if (positive === firstTrustPositive) trustStreak += firstTrustPositive ? 1 : -1;
+          else break;
         }
 
         await queryUnsafe(
@@ -229,8 +213,6 @@ export async function computeConsecutiveDays(date: string): Promise<void> {
         console.error(`[computeConsecutiveDays] Failed for ${symbol}: ${err}`);
       }
     }
-
-    console.log(`[computeConsecutiveDays] Done.`);
   } catch (err) {
     console.error(`[computeConsecutiveDays] Fatal error: ${err}`);
   }
@@ -282,5 +264,66 @@ export async function ingestMarginData(date: string): Promise<IngestResult> {
   }
 
   console.log(`[ingestMarginData] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+// -----------------------------------------------------------------------------
+// 6. ingestFundamentals
+// Fetches PE, PB, dividend yield from TWSE BWIBBU_ALL endpoint.
+// Stores under current quarter period (e.g. '2026Q2').
+// Also updates dividend_summary table with latest yield.
+// -----------------------------------------------------------------------------
+
+export async function ingestFundamentals(): Promise<IngestResult> {
+  console.log('[ingestFundamentals] Fetching fundamentals from TWSE…');
+  const errors: string[] = [];
+  let count = 0;
+
+  const records = await fetchFundamentals();
+  console.log(`[ingestFundamentals] Fetched ${records.length} records.`);
+
+  if (records.length === 0) {
+    return { count: 0, errors: ['No fundamentals data returned from TWSE'] };
+  }
+
+  // Determine current period (e.g. 2026Q2)
+  const now     = new Date();
+  const year    = now.getFullYear();
+  const quarter = Math.ceil((now.getMonth() + 1) / 3);
+  const period  = `${year}Q${quarter}`;
+
+  for (const f of records) {
+    try {
+      // Only upsert stocks that exist in our stocks table
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, pe_ratio, pb_ratio)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET pe_ratio = EXCLUDED.pe_ratio,
+               pb_ratio = EXCLUDED.pb_ratio`,
+        [f.symbol, period, f.pe_ratio, f.pb_ratio],
+      );
+      count++;
+
+      // Also update dividend_summary with latest yield if available
+      if (f.dividend_yield !== null) {
+        await queryUnsafe(
+          `INSERT INTO dividend_summary (symbol, latest_yield_pct)
+           VALUES ($1, $2)
+           ON CONFLICT (symbol) DO UPDATE
+             SET latest_yield_pct = EXCLUDED.latest_yield_pct`,
+          [f.symbol, f.dividend_yield],
+        );
+      }
+    } catch (err) {
+      // Skip symbols not in stocks table (foreign key violation)
+      const msg = String(err);
+      if (!msg.includes('foreign key') && !msg.includes('violates')) {
+        errors.push(`[ingestFundamentals] Failed ${f.symbol}: ${msg}`);
+      }
+    }
+  }
+
+  console.log(`[ingestFundamentals] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
