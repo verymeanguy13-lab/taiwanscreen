@@ -51,7 +51,7 @@ function DimBar({ label, dim }: { label: string; dim: { score: number; reason: s
           }}
         />
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{dim.dim?.reason ?? dim.reason}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{dim.reason}</div>
     </div>
   );
 }
