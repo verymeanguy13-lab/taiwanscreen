@@ -18,6 +18,8 @@ import { HealthScore } from '@/components/stock/HealthScore';
 import { PTTWidget } from '@/components/stock/PTTWidget';
 import WatchlistButton from '@/components/stock/WatchlistButton';
 import AdSlot from '@/components/ads/AdSlot';
+import { CandlestickChart } from '@/components/kline/CandlestickChart';
+import { ScoreCard }        from '@/components/kline/ScoreCard';
 
 const fetcher = (url: string) =>
   fetch(url).then(r => {
@@ -59,6 +61,11 @@ function marginColor(v: number | undefined | null): string {
 export default function StockClient() {
   const { symbol } = useParams<{ symbol: string }>();
   const [activeTab, setActiveTab] = useState('fundamentals');
+  const { data: klineData } = useSWR(
+    activeTab === 'kline' ? `/api/kline/${symbol}` : null,
+    (url: string) => fetch(url).then(r => r.json()),
+    { revalidateOnFocus: false },
+  );
 
   const { data: res, isLoading, error } = useSWR(
     symbol ? `/api/stock/${symbol}` : null,
@@ -100,6 +107,7 @@ export default function StockClient() {
 
   const TABS = [
     { label: '基本面',   value: 'fundamentals' },
+    { label: '起漲分析', value: 'kline'        },
     { label: '配息紀錄', value: 'dividends'    },
     { label: '供應鏈',   value: 'supply'       },
     { label: '大股東',   value: 'shareholders' },
@@ -339,8 +347,16 @@ export default function StockClient() {
                   </Link>
                 </div>
               )}
-
+             {activeTab === 'kline' && (
+                <div style={{ paddingTop: 8 }}>
+                  <CandlestickChart symbol={symbol} />
+                  {klineData?.score && (
+                    <ScoreCard score={klineData.score} />
+                  )}
+                </div>
+              )}
               {activeTab === 'shareholders' && (
+                
                 <ShareholdersTab symbol={symbol} />
               )}
 
