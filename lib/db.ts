@@ -17,13 +17,13 @@ export async function query<T>(
   return rows as T[];
 }
 
-// For dynamically built SQL strings — uses sql.query() which accepts plain string + params
+// For dynamically built SQL strings
 export async function queryUnsafe<T>(
   sqlString: string,
   params: unknown[] = [],
 ): Promise<T[]> {
   const rows = await sql.query(sqlString, params);
-  return rows.rows as T[];
+  return rows as T[];
 }
 
 // Returns the most recent date in any date-keyed table
