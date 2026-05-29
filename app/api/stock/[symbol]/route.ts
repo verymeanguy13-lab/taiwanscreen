@@ -54,13 +54,18 @@ export async function GET(
             [symbol],
           ),
 
-          // 3. Latest fundamentals
+          // 3. Fundamentals — last 8 periods that actually have data
           queryUnsafe(
             `SELECT * FROM fundamentals
              WHERE symbol = $1
-               AND period = (
-                 SELECT MAX(period) FROM fundamentals WHERE symbol = $1
-               )`,
+               AND (
+                 eps IS NOT NULL OR
+                 revenue IS NOT NULL OR
+                 gross_margin IS NOT NULL OR
+                 pe_ratio IS NOT NULL
+               )
+             ORDER BY period DESC
+             LIMIT 8`,
             [symbol],
           ),
 
