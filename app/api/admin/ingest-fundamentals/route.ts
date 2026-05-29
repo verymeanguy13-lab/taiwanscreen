@@ -1,6 +1,7 @@
 // =============================================================================
 // app/api/admin/ingest-fundamentals/route.ts
 // POST /api/admin/ingest-fundamentals?offset=0
+// Processes 20 stocks at a time to stay within Vercel 10s timeout.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -8,18 +9,12 @@ import { queryUnsafe } from '@/lib/db';
 
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
 
-// Exact type strings from FinMind TaiwanStockFinancialStatements
 const TYPE_MAP: Record<string, string> = {
-  'Revenue':            'revenue',
-  'GrossProfit':        'gross_profit',
-  'OperatingIncome':    'operating_income',
-  'IncomeAfterTaxes':   'net_income',   // ← was 'NetIncome', now correct
-  'EPS':                'eps',
-};
-
-// FinMind TaiwanStockPerShare types we care about
-const PER_SHARE_MAP: Record<string, string> = {
-  'EPS': 'eps',
+  'Revenue':          'revenue',
+  'GrossProfit':      'gross_profit',
+  'OperatingIncome':  'operating_income',
+  'IncomeAfterTaxes': 'net_income',
+  'EPS':              'eps',
 };
 
 async function fetchFinMind(dataset: string, stockId: string, startDate: string) {
@@ -50,8 +45,9 @@ export async function POST(req: NextRequest) {
   const offset = parseInt(searchParams.get('offset') ?? '0', 10);
 
   try {
+    // Only 20 stocks per call to stay within 10s Vercel timeout
     const stocks = await queryUnsafe<{ symbol: string }>(
-      `SELECT symbol FROM stocks ORDER BY symbol LIMIT 200 OFFSET $1`,
+      `SELECT symbol FROM stocks ORDER BY symbol LIMIT 20 OFFSET $1`,
       [offset],
     );
 
@@ -61,12 +57,12 @@ export async function POST(req: NextRequest) {
     let count  = 0;
     let errors = 0;
 
-    for (const { symbol } of stocks) {
+    // Process all stocks in parallel for speed
+    await Promise.all(stocks.map(async ({ symbol }) => {
       try {
         const stmtData = await fetchFinMind('TaiwanStockFinancialStatements', symbol, startDate);
-        if (stmtData.length === 0) continue;
+        if (stmtData.length === 0) return;
 
-        // Group by period
         const periodMap: Record<string, Record<string, number>> = {};
 
         for (const row of stmtData) {
@@ -76,14 +72,12 @@ export async function POST(req: NextRequest) {
           if (field) periodMap[period][field] = row.value;
         }
 
-        // Upsert each period
         for (const [period, fields] of Object.entries(periodMap)) {
-          const revenue      = fields['revenue']         ?? null;
-          const net_income   = fields['net_income']      ?? null;
-          const eps          = fields['eps']             ?? null;
-          const gross_profit = fields['gross_profit']    ?? null;
+          const revenue      = fields['revenue']      ?? null;
+          const net_income   = fields['net_income']   ?? null;
+          const eps          = fields['eps']           ?? null;
+          const gross_profit = fields['gross_profit'] ?? null;
 
-          // Calculate margins from revenue
           const gross_margin = (revenue && gross_profit && revenue !== 0)
             ? Math.round((gross_profit / revenue) * 10000) / 100
             : null;
@@ -105,16 +99,20 @@ export async function POST(req: NextRequest) {
           );
           count++;
         }
-
-        await new Promise(r => setTimeout(r, 80));
-
       } catch (err) {
         console.error(`[ingest-fundamentals] Failed for ${symbol}:`, err);
         errors++;
       }
-    }
+    }));
 
-    return NextResponse.json({ ok: true, offset, processed: stocks.length, count, errors });
+    return NextResponse.json({
+      ok: true,
+      offset,
+      processed: stocks.length,
+      next_offset: offset + 20,
+      count,
+      errors,
+    });
 
   } catch (err) {
     console.error('[ingest-fundamentals] Fatal:', err);
