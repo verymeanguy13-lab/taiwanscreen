@@ -1,6 +1,5 @@
 // =============================================================================
 // lib/ingest.ts — TWSE data ingestion pipeline
-// Fetches from TWSE APIs and upserts into Neon PostgreSQL.
 // =============================================================================
 
 import { queryUnsafe } from '@/lib/db';
@@ -13,10 +12,6 @@ import {
 } from '@/lib/twse';
 
 type IngestResult = { count: number; errors: string[] };
-
-// -----------------------------------------------------------------------------
-// 1. ingestStockList
-// -----------------------------------------------------------------------------
 
 export async function ingestStockList(): Promise<IngestResult> {
   console.log('[ingestStockList] Fetching stock list from TWSE…');
@@ -33,8 +28,9 @@ export async function ingestStockList(): Promise<IngestResult> {
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (symbol) DO UPDATE
            SET name_zh = EXCLUDED.name_zh,
-               sector  = EXCLUDED.sector`,
-        [stock.symbol, stock.name_zh, stock.sector ?? null, 'TWSE'],
+               sector  = EXCLUDED.sector,
+               market  = EXCLUDED.market`,
+        [stock.symbol, stock.name_zh, stock.sector ?? null, stock.market],
       );
       count++;
     } catch (err) {
@@ -47,10 +43,6 @@ export async function ingestStockList(): Promise<IngestResult> {
   console.log(`[ingestStockList] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
-
-// -----------------------------------------------------------------------------
-// 2. ingestDailyPrices
-// -----------------------------------------------------------------------------
 
 export async function ingestDailyPrices(date: string): Promise<IngestResult> {
   console.log(`[ingestDailyPrices] Fetching prices for ${date}…`);
@@ -87,10 +79,6 @@ export async function ingestDailyPrices(date: string): Promise<IngestResult> {
   console.log(`[ingestDailyPrices] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
-
-// -----------------------------------------------------------------------------
-// 3. ingestInstitutionalFlows
-// -----------------------------------------------------------------------------
 
 export async function ingestInstitutionalFlows(date: string): Promise<IngestResult> {
   console.log(`[ingestInstitutionalFlows] Fetching institutional flows for ${date}…`);
@@ -137,7 +125,6 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
     }
   }
 
-  // Mark triple_buy
   try {
     await queryUnsafe(
       `UPDATE institutional_flows
@@ -156,10 +143,6 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
   console.log(`[ingestInstitutionalFlows] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
-
-// -----------------------------------------------------------------------------
-// 4. computeConsecutiveDays
-// -----------------------------------------------------------------------------
 
 export async function computeConsecutiveDays(date: string): Promise<void> {
   console.log(`[computeConsecutiveDays] Starting for date ${date}…`);
@@ -218,10 +201,6 @@ export async function computeConsecutiveDays(date: string): Promise<void> {
   }
 }
 
-// -----------------------------------------------------------------------------
-// 5. ingestMarginData
-// -----------------------------------------------------------------------------
-
 export async function ingestMarginData(date: string): Promise<IngestResult> {
   console.log(`[ingestMarginData] Fetching margin data for ${date}…`);
   const errors: string[] = [];
@@ -267,13 +246,6 @@ export async function ingestMarginData(date: string): Promise<IngestResult> {
   return { count, errors };
 }
 
-// -----------------------------------------------------------------------------
-// 6. ingestFundamentals
-// Fetches PE, PB, dividend yield from TWSE BWIBBU_ALL endpoint.
-// Stores under current quarter period (e.g. '2026Q2').
-// Also updates dividend_summary table with latest yield.
-// -----------------------------------------------------------------------------
-
 export async function ingestFundamentals(): Promise<IngestResult> {
   console.log('[ingestFundamentals] Fetching fundamentals from TWSE…');
   const errors: string[] = [];
@@ -286,7 +258,6 @@ export async function ingestFundamentals(): Promise<IngestResult> {
     return { count: 0, errors: ['No fundamentals data returned from TWSE'] };
   }
 
-  // Determine current period (e.g. 2026Q2)
   const now     = new Date();
   const year    = now.getFullYear();
   const quarter = Math.ceil((now.getMonth() + 1) / 3);
@@ -294,7 +265,6 @@ export async function ingestFundamentals(): Promise<IngestResult> {
 
   for (const f of records) {
     try {
-      // Only upsert stocks that exist in our stocks table
       await queryUnsafe(
         `INSERT INTO fundamentals (symbol, period, pe_ratio, pb_ratio)
          VALUES ($1, $2, $3, $4)
@@ -305,7 +275,6 @@ export async function ingestFundamentals(): Promise<IngestResult> {
       );
       count++;
 
-      // Also update dividend_summary with latest yield if available
       if (f.dividend_yield !== null) {
         await queryUnsafe(
           `INSERT INTO dividend_summary (symbol, latest_yield_pct)
@@ -316,7 +285,6 @@ export async function ingestFundamentals(): Promise<IngestResult> {
         );
       }
     } catch (err) {
-      // Skip symbols not in stocks table (foreign key violation)
       const msg = String(err);
       if (!msg.includes('foreign key') && !msg.includes('violates')) {
         errors.push(`[ingestFundamentals] Failed ${f.symbol}: ${msg}`);

@@ -43,17 +43,18 @@ export interface RawMarginData {
 }
 
 export interface RawStockInfo {
-  symbol:   string;
-  name_zh:  string;
-  sector:   string;
+  symbol:  string;
+  name_zh: string;
+  sector:  string;
+  market:  'TWSE' | 'TPEx';
 }
 
 export interface RawETFData {
-  symbol:    string;
-  name_zh:   string;
-  nav:       number;
-  close:     number;
-  volume:    number;
+  symbol:     string;
+  name_zh:    string;
+  nav:        number;
+  close:      number;
+  volume:     number;
   change_pct: number;
 }
 
@@ -155,7 +156,13 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
         const dealer_sell  = parseNum(r['自營商賣出股數(自行買賣)']) + parseNum(r['自營商賣出股數(避險)']);
         const dealer_net   = (parseNum(r['自營商淨買股數(自行買賣)']) + parseNum(r['自營商淨買股數(避險)'])) || (dealer_buy - dealer_sell);
         const total_net    = parseNum(r['三大法人買賣超股數']) || (foreign_net + trust_net + dealer_net);
-        return { symbol: r['證券代號'].trim(), foreign_buy, foreign_sell, foreign_net, trust_buy, trust_sell, trust_net, dealer_buy, dealer_sell, dealer_net, total_net };
+        return {
+          symbol: r['證券代號'].trim(),
+          foreign_buy, foreign_sell, foreign_net,
+          trust_buy, trust_sell, trust_net,
+          dealer_buy, dealer_sell, dealer_net,
+          total_net,
+        };
       });
   } catch (err) {
     console.error('[fetchInstitutionalFlows] Unexpected error:', err);
@@ -204,14 +211,37 @@ export async function fetchMarginData(): Promise<RawMarginData[]> {
 export async function fetchStockList(): Promise<RawStockInfo[]> {
   try {
     type TWSEStockInfo = { '公司代號': string; '公司簡稱': string; '產業類別': string };
-    const rows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
-    return rows
+
+    // ── TWSE (上市) ──────────────────────────────────────────────────────────
+    const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
+    const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
       .map(r => ({
         symbol:  r['公司代號'].trim(),
         name_zh: r['公司簡稱']?.trim() ?? '',
         sector:  r['產業類別']?.trim() ?? '',
+        market:  'TWSE' as const,
       }));
+
+    // ── TPEx (上櫃) ──────────────────────────────────────────────────────────
+    let tpexStocks: RawStockInfo[] = [];
+    try {
+      const tpexRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_R');
+      tpexStocks = tpexRows
+        .filter(r => r['公司代號'])
+        .map(r => ({
+          symbol:  r['公司代號'].trim(),
+          name_zh: r['公司簡稱']?.trim() ?? '',
+          sector:  r['產業類別']?.trim() ?? '',
+          market:  'TPEx' as const,
+        }));
+      console.log(`[fetchStockList] TPEx: ${tpexStocks.length} stocks`);
+    } catch (err) {
+      console.error('[fetchStockList] TPEx fetch failed:', err);
+    }
+
+    console.log(`[fetchStockList] TWSE: ${twseStocks.length}, TPEx: ${tpexStocks.length}`);
+    return [...twseStocks, ...tpexStocks];
   } catch (err) {
     console.error('[fetchStockList] Unexpected error:', err);
     return [];
@@ -281,15 +311,8 @@ export async function fetchHistoricalPrices(symbol: string, yyyymm: string): Pro
   }
 }
 
-// -----------------------------------------------------------------------------
-// fetchFundamentals
-// Uses TWSE BWIBBU_ALL (PE/PB/yield for dividend-paying stocks)
-// AND PBX_ALL (PB ratio for all stocks) to get broader coverage.
-// -----------------------------------------------------------------------------
-
 export async function fetchFundamentals(): Promise<RawFundamentals[]> {
   try {
-    // Primary: BWIBBU_ALL — PE, PB, yield (only stocks with recent dividends)
     type BWIBBU = {
       Code:         string;
       '殖利率(%)':  string;
@@ -297,7 +320,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
       '股價淨值比': string;
     };
 
-    // Secondary: PBX — PB ratio for ALL listed stocks
     type PBX = {
       '證券代號': string;
       '本益比':   string;
@@ -312,7 +334,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
 
     console.log(`[fetchFundamentals] BWIBBU_ALL: ${bwiRows.length} rows, PBX: ${pbxRows.length} rows`);
 
-    // Build map from PBX first (broader coverage)
     const map = new Map<string, RawFundamentals>();
 
     for (const r of pbxRows) {
@@ -326,7 +347,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
       });
     }
 
-    // Overlay BWIBBU (more accurate for dividend stocks)
     for (const r of bwiRows) {
       const symbol = r.Code?.trim();
       if (!symbol) continue;
