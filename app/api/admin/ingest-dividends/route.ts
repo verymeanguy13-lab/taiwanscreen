@@ -1,7 +1,5 @@
 // =============================================================================
 // app/api/admin/ingest-dividends/route.ts
-// POST /api/admin/ingest-dividends?offset=N
-// Fixed field names to match actual FinMind TaiwanStockDividend response
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,17 +32,14 @@ async function fetchDividendsForSymbol(symbol: string): Promise<FinMindDividend[
 }
 
 export async function POST(req: NextRequest) {
-  // ── Auth ────────────────────────────────────────────────────────────────────
   const secret = req.headers.get('x-cron-secret');
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // ── Params ──────────────────────────────────────────────────────────────────
   const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0', 10);
   const limit  = 20;
 
-  // ── Fetch top stocks by volume ───────────────────────────────────────────────
   const stocks = await queryUnsafe<{ symbol: string }>(
     `SELECT s.symbol
      FROM stocks s
@@ -60,28 +55,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No stocks found at this offset', offset });
   }
 
-  // ── Ingest dividends for each stock ─────────────────────────────────────────
-  const results: { symbol: string; inserted: number; error?: string }[] = [];
+  const results: { symbol: string; inserted: number; skipped: number; first_error?: string }[] = [];
 
   for (const { symbol } of stocks) {
     try {
       const dividends = await fetchDividendsForSymbol(symbol);
       if (dividends.length === 0) {
-        results.push({ symbol, inserted: 0 });
+        results.push({ symbol, inserted: 0, skipped: 0 });
         continue;
       }
 
       let inserted = 0;
+      let skipped  = 0;
+      let firstError: string | undefined;
+
       for (const d of dividends) {
-        const cashDiv   = (d.CashEarningsDistribution  ?? 0) + (d.CashStatutorySurplus  ?? 0);
-        const stockDiv  = (d.StockEarningsDistribution ?? 0) + (d.StockStatutorySurplus ?? 0);
+        const cashDiv  = (d.CashEarningsDistribution  ?? 0) + (d.CashStatutorySurplus  ?? 0);
+        const stockDiv = (d.StockEarningsDistribution ?? 0) + (d.StockStatutorySurplus ?? 0);
 
-        // Skip rows with no dividend at all
-        if (cashDiv === 0 && stockDiv === 0) continue;
+        if (cashDiv === 0 && stockDiv === 0) { skipped++; continue; }
 
-        // Use ex-dividend date if available, otherwise fall back to announcement date
         const exDate = d.CashExDividendTradingDate || d.StockExDividendTradingDate || d.date;
-        if (!exDate) continue;
+        if (!exDate) { skipped++; continue; }
 
         try {
           await queryUnsafe(
@@ -106,20 +101,19 @@ export async function POST(req: NextRequest) {
             ],
           );
           inserted++;
-        } catch {
-          // skip row-level errors
+        } catch (rowErr) {
+          skipped++;
+          if (!firstError) firstError = String(rowErr);
         }
       }
 
-      results.push({ symbol, inserted });
+      results.push({ symbol, inserted, skipped, first_error: firstError });
     } catch (err) {
-      results.push({ symbol, inserted: 0, error: String(err) });
+      results.push({ symbol, inserted: 0, skipped: 0, first_error: String(err) });
     }
   }
 
-  // ── Summary ──────────────────────────────────────────────────────────────────
   const totalInserted = results.reduce((sum, r) => sum + r.inserted, 0);
-  const errors = results.filter(r => r.error);
 
   return NextResponse.json({
     offset,
@@ -127,6 +121,5 @@ export async function POST(req: NextRequest) {
     total_inserted:   totalInserted,
     next_offset:      offset + limit,
     results,
-    errors: errors.length > 0 ? errors : undefined,
   });
 }
