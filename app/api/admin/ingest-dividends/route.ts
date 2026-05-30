@@ -78,26 +78,28 @@ export async function POST(req: NextRequest) {
         const exDate = d.CashExDividendTradingDate || d.StockExDividendTradingDate || d.date;
         if (!exDate) { skipped++; continue; }
 
+        const payDate = d.CashDividendPaymentDate || null;
+
         try {
           await queryUnsafe(
             `INSERT INTO dividends (
-               symbol, ex_date, period,
-               cash_dividend, stock_dividend, cash_tax,
-               total_dividend
+               symbol, ex_dividend_date, period, year,
+               cash_dividend, stock_dividend, payment_date
              ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (symbol, ex_date) DO UPDATE SET
+             ON CONFLICT (symbol, ex_dividend_date) DO UPDATE SET
                period         = EXCLUDED.period,
+               year           = EXCLUDED.year,
                cash_dividend  = EXCLUDED.cash_dividend,
                stock_dividend = EXCLUDED.stock_dividend,
-               total_dividend = EXCLUDED.total_dividend`,
+               payment_date   = EXCLUDED.payment_date`,
             [
               symbol,
               exDate,
               d.year ?? 'annual',
+              d.year ?? '',
               cashDiv,
               stockDiv,
-              0,
-              cashDiv + stockDiv,
+              payDate,
             ],
           );
           inserted++;
