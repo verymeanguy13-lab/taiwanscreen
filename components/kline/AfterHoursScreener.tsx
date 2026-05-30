@@ -28,20 +28,34 @@ const WORKFLOW_STEPS = [
   { step: 4, text: '本清單僅供技術面觀察，不構成買賣建議' },
 ];
 
+// Convert scanner result to ScanResult shape that StockSignalCard expects
+function toScanResult(r: any, side: 'bull' | 'bear'): ScanResult {
+  return {
+    symbol:        r.symbol,
+    name_zh:       r.name_zh,
+    sector:        r.sector ?? '',
+    price:         r.price ?? 0,
+    changePercent: r.changePercent ?? 0,
+    signals:       [],
+    trendStrength: {
+      bullScore:     side === 'bull' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
+      bearScore:     side === 'bear' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
+      dominantSide:  side,
+      bars:          [],
+    },
+    yesterdayTrend: r.breakoutType ?? '中性',
+    bullCount:      side === 'bull' ? 1 : 0,
+    bearCount:      side === 'bear' ? 1 : 0,
+  };
+}
+
 function WorkflowGuide({ count }: { count: number }) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={{
-      border: `1px solid ${BORDER}`, borderRadius: 8,
-      marginBottom: 16, overflow: 'hidden',
-    }}>
+    <div style={{ border: `1px solid ${BORDER}`, borderRadius: 8, marginBottom: 16, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
-        style={{
-          width: '100%', padding: '10px 16px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          background: '#0F1117', cursor: 'pointer', border: 'none',
-        }}
+        style={{ width: '100%', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0F1117', cursor: 'pointer', border: 'none' }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>
           盤後操作流程 — 共 {count} 檔符合條件
@@ -51,15 +65,8 @@ function WorkflowGuide({ count }: { count: number }) {
       {open && (
         <div style={{ background: '#08090E', padding: '12px 16px' }}>
           {WORKFLOW_STEPS.map(({ step, text }) => (
-            <div key={step} style={{
-              display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 8,
-            }}>
-              <span style={{
-                width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                background: '#1E2235', color: DOWN_COLOR,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, fontWeight: 700,
-              }}>
+            <div key={step} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 8 }}>
+              <span style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, background: '#1E2235', color: DOWN_COLOR, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                 {step}
               </span>
               <span style={{ fontSize: 12, color: '#8B8FA8', lineHeight: 1.5 }}>{text}</span>
@@ -71,38 +78,14 @@ function WorkflowGuide({ count }: { count: number }) {
   );
 }
 
-function FilterChips({
-  filters, active, onSelect, color,
-}: {
-  filters: string[];
-  active: string | null;
-  onSelect: (f: string | null) => void;
-  color: string;
-}) {
+function FilterChips({ filters, active, onSelect, color }: { filters: string[]; active: string | null; onSelect: (f: string | null) => void; color: string }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
-      <button
-        onClick={() => onSelect(null)}
-        style={{
-          fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
-          border: `1px solid ${active === null ? color : BORDER}`,
-          background: active === null ? `${color}22` : 'transparent',
-          color: active === null ? color : '#8B8FA8',
-        }}
-      >
+      <button onClick={() => onSelect(null)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${active === null ? color : BORDER}`, background: active === null ? `${color}22` : 'transparent', color: active === null ? color : '#8B8FA8' }}>
         全部
       </button>
       {filters.map(f => (
-        <button
-          key={f}
-          onClick={() => onSelect(active === f ? null : f)}
-          style={{
-            fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
-            border: `1px solid ${active === f ? color : BORDER}`,
-            background: active === f ? `${color}22` : 'transparent',
-            color: active === f ? color : '#8B8FA8',
-          }}
-        >
+        <button key={f} onClick={() => onSelect(active === f ? null : f)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${active === f ? color : BORDER}`, background: active === f ? `${color}22` : 'transparent', color: active === f ? color : '#8B8FA8' }}>
           {f}
         </button>
       ))}
@@ -115,38 +98,35 @@ export function AfterHoursScreener() {
     revalidateOnFocus: false,
   });
 
-  const [activeTab,   setActiveTab]   = useState<'bull' | 'bear'>('bull');
-  const [bullFilter,  setBullFilter]  = useState<string | null>(null);
-  const [bearFilter,  setBearFilter]  = useState<string | null>(null);
+  const [activeTab,  setActiveTab]  = useState<'bull' | 'bear'>('bull');
+  const [bullFilter, setBullFilter] = useState<string | null>(null);
+  const [bearFilter, setBearFilter] = useState<string | null>(null);
 
-  const bullResults: ScanResult[] = (data?.bull ?? []).sort(
-    (a: ScanResult, b: ScanResult) => b.trendStrength.bullScore - a.trendStrength.bullScore,
-  );
-  const bearResults: ScanResult[] = (data?.bear ?? []).sort(
-    (a: ScanResult, b: ScanResult) => b.trendStrength.bearScore - a.trendStrength.bearScore,
-  );
+  // Scanner returns { results, totalScanned, signalCounts }
+  // Split into bull (positive changePercent or uptrend breakout) and bear
+  const rawResults: any[] = data?.results ?? [];
+
+  const bullResults: ScanResult[] = rawResults
+    .filter(r => r.changePercent >= 0 || r.breakoutType === '上漲趨勢突破' || r.breakoutType === '箱型整理突破')
+    .sort((a, b) => b.confidence - a.confidence)
+    .map(r => toScanResult(r, 'bull'));
+
+  const bearResults: ScanResult[] = rawResults
+    .filter(r => r.changePercent < 0 || r.breakoutType === '下跌V轉突破')
+    .sort((a, b) => b.confidence - a.confidence)
+    .map(r => toScanResult(r, 'bear'));
 
   const filteredBull = bullFilter
-    ? bullResults.filter((r: ScanResult) =>
-        r.signals.some(s => s.type === bullFilter) ||
-        r.yesterdayTrend === bullFilter
-      )
+    ? bullResults.filter(r => r.yesterdayTrend === bullFilter)
     : bullResults;
 
   const filteredBear = bearFilter
-    ? bearResults.filter((r: ScanResult) =>
-        r.signals.some(s => s.type === bearFilter) ||
-        r.yesterdayTrend === bearFilter
-      )
+    ? bearResults.filter(r => r.yesterdayTrend === bearFilter)
     : bearResults;
 
   if (isLoading) {
     return (
-      <div style={{
-        height: 200, display: 'flex', alignItems: 'center',
-        justifyContent: 'center', color: '#8B8FA8', fontSize: 13,
-        background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}`,
-      }}>
+      <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B8FA8', fontSize: 13, background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}` }}>
         載入盤後資料中...
       </div>
     );
@@ -154,47 +134,28 @@ export function AfterHoursScreener() {
 
   if (error) {
     return (
-      <div style={{
-        height: 200, display: 'flex', alignItems: 'center',
-        justifyContent: 'center', color: UP_COLOR, fontSize: 13,
-        background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}`,
-      }}>
+      <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UP_COLOR, fontSize: 13, background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}` }}>
         無法載入盤後資料
       </div>
     );
   }
 
-  const totalCount = bullResults.length + bearResults.length;
+  const totalCount = rawResults.length;
 
   return (
     <div style={{ background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
-      {/* Workflow guide */}
       <div style={{ padding: 16, borderBottom: `1px solid ${BORDER}` }}>
         <WorkflowGuide count={totalCount} />
       </div>
 
-      {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${BORDER}` }}>
         {(['bull', 'bear'] as const).map(tab => {
           const color = tab === 'bull' ? UP_COLOR : DOWN_COLOR;
           const count = tab === 'bull' ? bullResults.length : bearResults.length;
           return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600,
-                color: activeTab === tab ? color : '#8B8FA8',
-                borderBottom: activeTab === tab
-                  ? `2px solid ${color}` : '2px solid transparent',
-                background: 'transparent', cursor: 'pointer',
-              }}
-            >
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, color: activeTab === tab ? color : '#8B8FA8', borderBottom: activeTab === tab ? `2px solid ${color}` : '2px solid transparent', background: 'transparent', cursor: 'pointer' }}>
               {tab === 'bull' ? '多方候選' : '空方候選'}
-              <span style={{
-                marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 10,
-                color, background: `${color}22`, border: `1px solid ${color}44`,
-              }}>
+              <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 10, color, background: `${color}22`, border: `1px solid ${color}44` }}>
                 {count}
               </span>
             </button>
@@ -202,45 +163,26 @@ export function AfterHoursScreener() {
         })}
       </div>
 
-      {/* Content */}
       <div style={{ padding: 16 }}>
         {activeTab === 'bull' ? (
           <>
-            <FilterChips
-              filters={BULL_STRATEGY_FILTERS}
-              active={bullFilter}
-              onSelect={setBullFilter}
-              color={UP_COLOR}
-            />
+            <FilterChips filters={BULL_STRATEGY_FILTERS} active={bullFilter} onSelect={setBullFilter} color={UP_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBull.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>
-                  暫無多方候選股
-                </div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無多方候選股</div>
               ) : (
-                filteredBull.map((r: ScanResult) => (
-                  <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bull" />
-                ))
+                filteredBull.map(r => <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bull" />)
               )}
             </div>
           </>
         ) : (
           <>
-            <FilterChips
-              filters={BEAR_STRATEGY_FILTERS}
-              active={bearFilter}
-              onSelect={setBearFilter}
-              color={DOWN_COLOR}
-            />
+            <FilterChips filters={BEAR_STRATEGY_FILTERS} active={bearFilter} onSelect={setBearFilter} color={DOWN_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBear.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>
-                  暫無空方候選股
-                </div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無空方候選股</div>
               ) : (
-                filteredBear.map((r: ScanResult) => (
-                  <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bear" />
-                ))
+                filteredBear.map(r => <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bear" />)
               )}
             </div>
           </>
