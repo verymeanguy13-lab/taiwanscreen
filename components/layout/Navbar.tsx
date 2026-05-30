@@ -9,7 +9,6 @@ import { useTranslations } from 'next-intl';
 const NAV_LINKS = [
   { key: 'dazhang',      href: '/dazhang'      },
   { key: 'rankings',     href: '/rankings'     },
-  { key: 'rankings',     href: '/rankings'     },
   { key: 'screener',     href: '/screener'     },
   { key: 'heatmap',      href: '/heatmap'      },
   { key: 'institutional',href: '/institutional' },
