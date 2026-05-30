@@ -1,9 +1,7 @@
 // =============================================================================
 // app/api/admin/ingest-dividends/route.ts
 // POST /api/admin/ingest-dividends?offset=N
-//
-// Ingests dividend data from FinMind TaiwanStockDividend dataset.
-// Processes 20 stocks at a time ordered by volume (same approach as fundamentals).
+// Fixed field names to match actual FinMind TaiwanStockDividend response
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -14,14 +12,16 @@ const FINMIND_TOKEN = process.env.FINMIND_TOKEN ?? '';
 const START_DATE = '2015-01-01';
 
 interface FinMindDividend {
-  stock_id:            string;
-  date:                string;
-  year:                string;
-  period:              string;
-  CashDividend:        number;
-  StockDividend:       number;
-  CashDividendTax:     number;
-  TotalDividend:       number;
+  date:                        string;
+  stock_id:                    string;
+  year:                        string;
+  CashEarningsDistribution:    number;
+  StockEarningsDistribution:   number;
+  CashStatutorySurplus:        number;
+  StockStatutorySurplus:       number;
+  CashExDividendTradingDate:   string;
+  StockExDividendTradingDate:  string;
+  CashDividendPaymentDate:     string;
 }
 
 async function fetchDividendsForSymbol(symbol: string): Promise<FinMindDividend[]> {
@@ -29,8 +29,8 @@ async function fetchDividendsForSymbol(symbol: string): Promise<FinMindDividend[
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`FinMind HTTP ${res.status} for ${symbol}`);
   const json = await res.json();
-  if (json.status !== 200) return [];
-  return (json.data ?? []) as FinMindDividend[];
+  if (!json.data || json.data.length === 0) return [];
+  return json.data as FinMindDividend[];
 }
 
 export async function POST(req: NextRequest) {
@@ -73,7 +73,15 @@ export async function POST(req: NextRequest) {
 
       let inserted = 0;
       for (const d of dividends) {
-        if (!d.CashDividend && !d.StockDividend) continue;
+        const cashDiv   = (d.CashEarningsDistribution  ?? 0) + (d.CashStatutorySurplus  ?? 0);
+        const stockDiv  = (d.StockEarningsDistribution ?? 0) + (d.StockStatutorySurplus ?? 0);
+
+        // Skip rows with no dividend at all
+        if (cashDiv === 0 && stockDiv === 0) continue;
+
+        // Use ex-dividend date if available, otherwise fall back to announcement date
+        const exDate = d.CashExDividendTradingDate || d.StockExDividendTradingDate || d.date;
+        if (!exDate) continue;
 
         try {
           await queryUnsafe(
@@ -86,16 +94,15 @@ export async function POST(req: NextRequest) {
                period         = EXCLUDED.period,
                cash_dividend  = EXCLUDED.cash_dividend,
                stock_dividend = EXCLUDED.stock_dividend,
-               cash_tax       = EXCLUDED.cash_tax,
                total_dividend = EXCLUDED.total_dividend`,
             [
               symbol,
-              d.date,
-              d.period ?? 'annual',
-              d.CashDividend    ?? 0,
-              d.StockDividend   ?? 0,
-              d.CashDividendTax ?? 0,
-              d.TotalDividend   ?? (d.CashDividend ?? 0),
+              exDate,
+              d.year ?? 'annual',
+              cashDiv,
+              stockDiv,
+              0,
+              cashDiv + stockDiv,
             ],
           );
           inserted++;
