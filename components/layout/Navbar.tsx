@@ -7,7 +7,8 @@ import { Zap, Menu, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 const NAV_LINKS = [
-  { key: 'dazhang',     href: '/dazhang'      },
+  { key: 'dazhang',      href: '/dazhang'      },
+  { key: 'rankings',     href: '/rankings'     },
   { key: 'screener',     href: '/screener'     },
   { key: 'heatmap',      href: '/heatmap'      },
   { key: 'institutional',href: '/institutional' },
@@ -83,7 +84,6 @@ export default function Navbar() {
 
         {/* ── Right side ── */}
         <div className="flex items-center gap-2">
-          {/* Language toggle */}
           <button
             onClick={handleLangToggle}
             className="hidden md:inline-flex h-8 w-10 items-center justify-center rounded text-xs font-semibold transition-colors duration-150"
@@ -94,7 +94,6 @@ export default function Navbar() {
             {currentLocale === 'zh' ? 'EN' : '中'}
           </button>
 
-          {/* Login */}
           <Link
             href={`/${currentLocale}/login`}
             className="hidden md:inline-flex h-8 items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
@@ -113,7 +112,6 @@ export default function Navbar() {
             {t('login')}
           </Link>
 
-          {/* Hamburger (mobile only) */}
           <button
             className="flex md:hidden items-center justify-center rounded p-1.5"
             style={{ color: 'var(--text-secondary)' }}
