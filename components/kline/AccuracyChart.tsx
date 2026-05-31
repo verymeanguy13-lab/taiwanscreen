@@ -135,7 +135,7 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
               <ReferenceLine y={50} stroke="var(--accent-gold)" strokeDasharray="4 4" />
               <Tooltip
                 contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-                formatter={(_: number, __: string, props: any) => {
+                formatter={(_: unknown, __: unknown, props: any) => {
                   const { up, total, rate } = props.payload;
                   return [`${up}次上漲 / ${total}次 = ${rate}%`, '勝率'];
                 }}
