@@ -1,6 +1,7 @@
 {
   "nav": {
     "dazhang":      "AI 盯盤",
+    "accuracy":     "型態統計",
     "rankings":     "起漲雷達",
     "screener":     "選股器",
     "heatmap":      "熱力圖",

@@ -1,6 +1,7 @@
 {
   "nav": {
     "dazhang":       "AI Watch",
+    "accuracy":      "Signal Stats",
     "rankings":      "Signal Radar",
     "screener":      "Screener",
     "heatmap":       "Heat Map",
