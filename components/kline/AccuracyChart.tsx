@@ -108,7 +108,7 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
             <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="4 4" />
             <Tooltip
               contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-              formatter={(v: number) => [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, '累計報酬']}
+              formatter={(v: unknown) => { const n = Number(v); return [`${n >= 0 ? '+' : ''}${n.toFixed(2)}%`, '累計報酬']; }}
             />
             <Area type="monotone" dataKey="cumulative"
               stroke={lineColor} strokeWidth={2}
