@@ -227,10 +227,9 @@ export async function GET(req: NextRequest) {
         to:            alert.email,
         stock_symbol:  alert.symbol,
         stock_name:    alert.name_zh,
-        alert_type:    conditions.map(c => c.type).join(' / '),
+        alert_type:    message,
         threshold:     conditions[0]?.threshold ?? 0,
         current_value: price,
-        message,
       });
 
       if (sent) emails_sent++;
