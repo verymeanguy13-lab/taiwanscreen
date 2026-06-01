@@ -6,78 +6,39 @@
 // 2-cron-job limit.
 //
 // Checks all active user alerts and sends email if conditions are met.
+// Updated Session 60: uses alertEvaluator for 36-condition multi-rule support.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { query, sql } from '@/lib/db';
+import { query, queryUnsafe, sql } from '@/lib/db';
 import { sendAlertEmail } from '@/lib/notify';
+import { evaluateRule, buildAlertMessage } from '@/lib/alertEvaluator';
+import type { AlertRule, AlertCondition, EvaluationContext, IndicatorSet } from '@/lib/alertEvaluator';
+import { sma, rsi as calcRsi, macd as calcMacd, kdj as calcKdj, bollingerBands, volumeRatio } from '@/lib/indicators';
+import { detectAllBreakouts } from '@/lib/breakouts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface AlertRow {
-  id: number;
-  user_id: string;
-  symbol: string;
-  alert_type: string;
-  threshold: number;
-  name_zh: string;
-  email: string;
-  current_price: number | null;
+  id:                       number;
+  user_id:                  string;
+  symbol:                   string;
+  alert_type:               string;
+  threshold:                number;
+  alert_logic:              string | null;
+  conditions:               unknown;   // JSONB — parsed below
+  name_zh:                  string;
+  email:                    string;
+  current_price:            number | null;
   foreign_consecutive_days: number | null;
-  triple_buy: boolean | null;
-  latest_yield_pct: number | null;
-}
-
-// ── Condition checker ─────────────────────────────────────────────────────────
-
-function isConditionTriggered(
-  alert: AlertRow,
-): { triggered: boolean; current_value: number } {
-  const {
-    alert_type,
-    threshold,
-    current_price,
-    foreign_consecutive_days,
-    triple_buy,
-    latest_yield_pct,
-  } = alert;
-
-  switch (alert_type) {
-    case 'price_above':
-      return {
-        triggered: current_price != null && current_price > threshold,
-        current_value: current_price ?? 0,
-      };
-    case 'price_below':
-      return {
-        triggered: current_price != null && current_price < threshold,
-        current_value: current_price ?? 0,
-      };
-    case 'triple_buy':
-      return {
-        triggered: triple_buy === true,
-        current_value: triple_buy ? 1 : 0,
-      };
-    case 'foreign_buy_streak':
-      return {
-        triggered:
-          foreign_consecutive_days != null &&
-          foreign_consecutive_days >= threshold,
-        current_value: foreign_consecutive_days ?? 0,
-      };
-    case 'yield_above':
-      return {
-        triggered: latest_yield_pct != null && latest_yield_pct >= threshold,
-        current_value: latest_yield_pct ?? 0,
-      };
-    default:
-      return { triggered: false, current_value: 0 };
-  }
+  triple_buy:               boolean | null;
+  latest_yield_pct:         number | null;
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+
   // ── 1. Validate secret ───────────────────────────────────────────────────
   const secret = req.headers.get('x-cron-secret');
   if (!secret || secret !== process.env.CRON_SECRET) {
@@ -85,10 +46,10 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 2. Taiwan time gate: Mon–Fri, 08:00–23:59 (UTC+8) ───────────────────
-  const now = new Date();
+  const now    = new Date();
   const twMs   = now.getTime() + 8 * 60 * 60 * 1000;
   const twDate = new Date(twMs);
-  const day    = twDate.getUTCDay();   // 0 = Sun, 6 = Sat
+  const day    = twDate.getUTCDay();
   const hour   = twDate.getUTCHours();
 
   if (day === 0 || day === 6 || hour < 8) {
@@ -103,6 +64,8 @@ export async function GET(req: NextRequest) {
       a.symbol,
       a.alert_type,
       a.threshold,
+      a.alert_logic,
+      a.conditions,
       s.name_zh,
       u.email,
       dp.close                    AS current_price,
@@ -126,35 +89,167 @@ export async function GET(req: NextRequest) {
       AND (a.last_triggered IS NULL OR a.last_triggered < CURRENT_DATE)
   `;
 
-  // ── 4. Check each alert and send email if triggered ──────────────────────
+  // ── 4. Evaluate each alert ────────────────────────────────────────────────
   let triggered   = 0;
   let emails_sent = 0;
 
   for (const alert of alerts) {
-    const { triggered: fired, current_value } = isConditionTriggered(alert);
-    if (!fired) continue;
 
-    triggered++;
+    // ── Parse conditions (support legacy single-condition rows) ─────────────
+    let conditions: AlertCondition[] = [];
+    try {
+      const raw = alert.conditions;
+      if (Array.isArray(raw)) {
+        conditions = raw as AlertCondition[];
+      } else if (typeof raw === 'string') {
+        conditions = JSON.parse(raw) as AlertCondition[];
+      } else {
+        // Legacy row — build condition from alert_type + threshold columns
+        conditions = [{ type: alert.alert_type as any, threshold: alert.threshold }];
+      }
+    } catch {
+      conditions = [{ type: alert.alert_type as any, threshold: alert.threshold }];
+    }
 
-    const sent = await sendAlertEmail({
-      to:           alert.email,
-      stock_symbol: alert.symbol,
-      stock_name:   alert.name_zh,
-      alert_type:   alert.alert_type,
-      threshold:    Number(alert.threshold),
-      current_value,
-    });
+    if (conditions.length === 0) continue;
 
-    if (sent) emails_sent++;
+    const rule: AlertRule = {
+      id:        String(alert.id),
+      stockId:   alert.symbol,
+      conditions,
+      logic:     (alert.alert_logic as 'AND' | 'OR') ?? 'OR',
+      enabled:   true,
+      triggered: false,
+      createdAt: '',
+    };
 
-    // Always mark triggered — even if email failed — so we don't retry
-    // the same alert today. Fix RESEND_API_KEY first, then manually
-    // clear last_triggered if you need to resend.
-    await sql`
-      UPDATE alerts
-      SET last_triggered = NOW()
-      WHERE id = ${alert.id}
-    `;
+    // ── Fetch last 60 candles ───────────────────────────────────────────────
+    const candleRows = await queryUnsafe<{
+      date: string; open: number; high: number;
+      low: number; close: number; volume: number;
+    }>(
+      `SELECT date, open, high, low, close, volume
+       FROM daily_prices
+       WHERE symbol = $1
+       ORDER BY date DESC LIMIT 60`,
+      [alert.symbol],
+    );
+
+    if (candleRows.length < 5) continue;
+    const candles = candleRows.reverse();
+
+    // ── Compute indicators ──────────────────────────────────────────────────
+    const closes  = candles.map(c => c.close);
+    const highs   = candles.map(c => c.high);
+    const lows    = candles.map(c => c.low);
+    const volumes = candles.map(c => c.volume);
+
+    const indicators: IndicatorSet = {
+      sma5:     sma(closes, 5),
+      sma20:    sma(closes, 20),
+      sma60:    sma(closes, 60),
+      rsi14:    calcRsi(closes, 14),
+      macd:     calcMacd(closes),
+      kdj:      calcKdj(highs, lows, closes),
+      bb:       bollingerBands(closes),
+      volRatio: volumeRatio(volumes, 5),
+    };
+
+    // ── Conditionally fetch extra data only when needed ─────────────────────
+    const condTypes = conditions.map(c => c.type);
+
+    const institutionalData = condTypes.some(
+      t => t === 'institutional_buy' || t === 'institutional_sell',
+    )
+      ? await queryUnsafe<any>(
+          `SELECT foreign_net, trust_net, dealer_net, total_net, date
+           FROM institutional_flows
+           WHERE symbol = $1
+           ORDER BY date DESC LIMIT 5`,
+          [alert.symbol],
+        )
+      : undefined;
+
+    const dividendDates = condTypes.includes('ex_dividend_soon')
+      ? await queryUnsafe<{ exDate: string }>(
+          `SELECT ex_dividend_date AS "exDate"
+           FROM dividends
+           WHERE symbol = $1 AND ex_dividend_date >= CURRENT_DATE
+           ORDER BY ex_dividend_date ASC LIMIT 3`,
+          [alert.symbol],
+        )
+      : undefined;
+
+    const breakouts = condTypes.includes('qichang_signal')
+      ? detectAllBreakouts(candles as any, {
+          sma5:  indicators.sma5,
+          sma20: indicators.sma20,
+          sma60: indicators.sma60,
+          rsi14: indicators.rsi14,
+          macd:  indicators.macd,
+        })
+      : undefined;
+
+    // ── Build EvaluationContext ─────────────────────────────────────────────
+    const lastCandle = candles[candles.length - 1];
+    const prevCandle = candles[candles.length - 2];
+    const price      = alert.current_price ?? lastCandle.close;
+    const prevClose  = prevCandle?.close ?? lastCandle.close;
+
+    const quote: any = {
+      z:  price,
+      y:  prevClose,
+      h:  lastCandle.high,
+      l:  lastCandle.low,
+      v:  lastCandle.volume,
+      tv: 0,
+      p:  prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+    };
+
+    const ctx: EvaluationContext = {
+      quote,
+      candles:        candles as any,
+      indicators,
+      institutional:  institutionalData,
+      dividendDates,
+      breakouts,
+    };
+
+    // ── Evaluate rule ───────────────────────────────────────────────────────
+    const fired = evaluateRule(rule, ctx);
+
+    if (fired) {
+      triggered++;
+
+      const message = buildAlertMessage(rule, ctx);
+
+      const sent = await sendAlertEmail({
+        to:            alert.email,
+        stock_symbol:  alert.symbol,
+        stock_name:    alert.name_zh,
+        alert_type:    conditions.map(c => c.type).join(' / '),
+        threshold:     conditions[0]?.threshold ?? 0,
+        current_value: price,
+        message,
+      });
+
+      if (sent) emails_sent++;
+
+      await sql`
+        UPDATE alerts
+        SET last_triggered = NOW()
+        WHERE id = ${alert.id}
+      `;
+    } else {
+      // Reset so the alert can re-trigger next time conditions are met
+      await sql`
+        UPDATE alerts
+        SET last_triggered = NULL
+        WHERE id = ${alert.id}
+          AND last_triggered IS NOT NULL
+          AND last_triggered < CURRENT_DATE
+      `;
+    }
   }
 
   // ── 5. Return summary ────────────────────────────────────────────────────
@@ -163,7 +258,7 @@ export async function GET(req: NextRequest) {
   );
 
   return NextResponse.json({
-    checked:      alerts.length,
+    checked:     alerts.length,
     triggered,
     emails_sent,
   });
