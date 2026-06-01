@@ -1,6 +1,7 @@
 // =============================================================================
 // app/api/admin/detect-signals/route.ts
 // POST /api/admin/detect-signals?offset=0
+// Reduced to 5 stocks per batch to stay within Vercel 10s timeout
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,9 +18,8 @@ export async function POST(req: NextRequest) {
     }
 
     const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0', 10);
-    const limit  = 20;
+    const limit  = 5; // 5 stocks per batch — safe within 10s timeout
 
-    // Get latest date from daily_prices
     const dateRow = await queryUnsafe<{ max: string }>(
       `SELECT MAX(date)::text AS max FROM daily_prices`,
       [],
@@ -29,7 +29,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No price data found' }, { status: 400 });
     }
 
-    // Get stocks ordered by volume
     const symbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
       `SELECT s.symbol, s.sector
        FROM stocks s
@@ -59,44 +58,25 @@ export async function POST(req: NextRequest) {
           [symbol],
         );
 
-        if (rows.length < 20) {
-          results.push({ symbol, signals: 0 });
-          continue;
-        }
+        if (rows.length < 20) { results.push({ symbol, signals: 0 }); continue; }
 
-        const candles = rows.reverse();
-        const closes  = candles.map(c => Number(c.close));
-        const highs   = candles.map(c => Number(c.high));
-        const lows    = candles.map(c => Number(c.low));
-
+        const candles  = rows.reverse();
+        const closes   = candles.map(c => Number(c.close));
         const sma5arr  = sma(closes, 5);
         const sma20arr = sma(closes, 20);
         const sma60arr = sma(closes, 60);
-        const rsi14arr = calcRsi(closes, 14);
         const macdData = calcMacd(closes);
         const bbData   = bollingerBands(closes);
-
-        const breakoutIndicators = {
-          sma5:  sma5arr,
-          sma20: sma20arr,
-          sma60: sma60arr,
-          rsi14: rsi14arr,
-          macd:  macdData,
-        };
-
-        const afterHoursIndicators = {
-          sma5:  sma5arr,
-          sma20: sma20arr,
-          sma60: sma60arr,
-          bb:    bbData,
-        };
 
         const today = candles[candles.length - 1];
         let symbolSignals = 0;
 
         // Breakout signals
         try {
-          const breakouts = detectAllBreakouts(candles as any, breakoutIndicators);
+          const breakouts = detectAllBreakouts(candles as any, {
+            sma5: sma5arr, sma20: sma20arr, sma60: sma60arr,
+            rsi14: calcRsi(closes, 14), macd: macdData,
+          });
           for (const b of breakouts) {
             try {
               await queryUnsafe(
@@ -106,17 +86,16 @@ export async function POST(req: NextRequest) {
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
                 [symbol, b.type, todayDate, Number(today.close), b.type, b.confidence, sector],
               );
-              symbolSignals++;
-              newSignals++;
-            } catch { /* skip duplicate */ }
+              symbolSignals++; newSignals++;
+            } catch { /* skip */ }
           }
-        } catch (e) {
-          // breakout detection failed for this symbol — skip
-        }
+        } catch { /* skip symbol */ }
 
         // After-hours bull signals
         try {
-          const afterHours = evaluateAfterHours(candles as any, afterHoursIndicators);
+          const afterHours = evaluateAfterHours(candles as any, {
+            sma5: sma5arr, sma20: sma20arr, sma60: sma60arr, bb: bbData,
+          });
           for (const s of afterHours.bullStrategies) {
             try {
               await queryUnsafe(
@@ -126,13 +105,10 @@ export async function POST(req: NextRequest) {
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
                 [symbol, s, todayDate, Number(today.close), afterHours.bullScore, sector],
               );
-              symbolSignals++;
-              newSignals++;
-            } catch { /* skip duplicate */ }
+              symbolSignals++; newSignals++;
+            } catch { /* skip */ }
           }
-        } catch (e) {
-          // after-hours detection failed for this symbol — skip
-        }
+        } catch { /* skip symbol */ }
 
         results.push({ symbol, signals: symbolSignals });
       } catch (err) {

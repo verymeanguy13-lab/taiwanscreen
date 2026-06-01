@@ -59,6 +59,11 @@ function priceCol(period: Period): string {
   return `price_${period.replace('d', '')}d`;
 }
 
+const EMPTY_RESPONSE = {
+  stats: [], monthlyTrend: [], recentSignals: [],
+  summary: { totalSignals: 0, priceUpRate: 0, avgReturn: 0, bestSignalType: '—', dataStartDate: '—' },
+};
+
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
 
@@ -66,6 +71,20 @@ export async function GET(req: NextRequest) {
   const signalType  = searchParams.get('signal_type') ?? 'all';
   const industry    = searchParams.get('industry')    ?? 'all';
   const limit       = Math.min(parseInt(searchParams.get('limit') ?? '100', 10), 500);
+
+  // ── Fast early return if table is empty ──────────────────────────────────
+  try {
+    const countRow = await queryUnsafe<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM signal_results`,
+      [],
+    );
+    if (parseInt(countRow[0]?.count ?? '0', 10) === 0) {
+      return NextResponse.json(EMPTY_RESPONSE,
+        { headers: { 'Cache-Control': 'no-store' } });
+    }
+  } catch {
+    return NextResponse.json(EMPTY_RESPONSE, { status: 500 });
+  }
 
   const period: Period = VALID_PERIODS.includes(periodParam as Period)
     ? (periodParam as Period) : '10d';
