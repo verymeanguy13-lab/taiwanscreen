@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
 
   const results: Record<string, unknown> = {};
 
+  // Tables with a date column
   for (const table of ['stocks', 'daily_prices', 'institutional_flows', 'margin_data', 'fundamentals', 'etfs', 'dividends']) {
     try {
       const rows = await queryUnsafe<{ count: string; max_date: string | null }>(
@@ -28,6 +29,17 @@ export async function GET(req: NextRequest) {
         results[table] = { error: String(err2) };
       }
     }
+  }
+
+  // signal_results uses signal_date not date
+  try {
+    const rows = await queryUnsafe<{ count: string; latest: string | null }>(
+      `SELECT COUNT(*) AS count, MAX(signal_date) AS latest FROM signal_results`,
+      [],
+    );
+    results['signal_results'] = { count: rows[0]?.count, latest_date: rows[0]?.latest };
+  } catch (err) {
+    results['signal_results'] = { error: String(err) };
   }
 
   const liveMode = req.nextUrl.searchParams.get('live') === '1';
