@@ -197,13 +197,18 @@ export async function GET(req: NextRequest) {
     const prevClose  = prevCandle?.close ?? lastCandle.close;
 
     const quote: any = {
-      z:  price,
-      y:  prevClose,
-      h:  lastCandle.high,
-      l:  lastCandle.low,
-      v:  lastCandle.volume,
-      tv: 0,
-      p:  prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+      price,
+      prevClose,
+      high:          lastCandle.high,
+      low:           lastCandle.low,
+      volume:        lastCandle.volume,
+      change:        price - prevClose,
+      changePercent: prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+      open:          lastCandle.open,
+      limitUp:       Math.round(prevClose * 1.1 * 100) / 100,
+      limitDown:     Math.round(prevClose * 0.9 * 100) / 100,
+      symbol:        alert.symbol,
+      time:          '',
     };
 
     const ctx: EvaluationContext = {
