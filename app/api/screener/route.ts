@@ -1,130 +1,235 @@
 // =============================================================================
-// app/api/admin/ingest-fundamentals/route.ts
-// POST /api/admin/ingest-fundamentals?offset=0
-// POST /api/admin/ingest-fundamentals?symbol=2330  (single stock mode)
+// app/api/screener/route.ts
+// GET /api/screener?price_min=10&pe_ratio_max=20&sort_by=change_pct&page=1
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
+
+const ALLOWED_SORT = new Set([
+  'change_pct', 'close', 'volume', 'market_cap',
+  'pe_ratio', 'pb_ratio', 'dividend_yield',
+  'margin_change', 'foreign_net',
+]);
+
 export async function GET(req: NextRequest) {
-  return POST(req);
-}
-const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
+  const p = req.nextUrl.searchParams;
 
-const TYPE_MAP: Record<string, string> = {
-  'Revenue':          'revenue',
-  'GrossProfit':      'gross_profit',
-  'OperatingIncome':  'operating_income',
-  'IncomeAfterTaxes': 'net_income',
-  'EPS':              'eps',
-};
+  // ── pagination ──────────────────────────────────────────────────────────────
+  const page     = Math.max(1, parseInt(p.get('page')     ?? '1',  10));
+  const per_page = Math.min(100, Math.max(1, parseInt(p.get('per_page') ?? '50', 10)));
+  const offset   = (page - 1) * per_page;
 
-async function fetchFinMind(dataset: string, stockId: string, startDate: string) {
-  const url = `${FINMIND_BASE}?dataset=${dataset}&data_id=${stockId}&start_date=${startDate}&token=`;
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.status === 200 ? json.data : [];
-  } catch {
-    return [];
-  }
-}
+  // ── sort ────────────────────────────────────────────────────────────────────
+  const raw_sort = p.get('sort_by') ?? 'change_pct';
+  const sort_by  = ALLOWED_SORT.has(raw_sort) ? raw_sort : 'change_pct';
+  const sort_dir = p.get('sort_dir') === 'asc' ? 'ASC' : 'DESC';
 
-function dateToPeriod(date: string): string {
-  const d = new Date(date);
-  const q = Math.ceil((d.getMonth() + 1) / 3);
-  return `${d.getFullYear()}Q${q}`;
-}
+  // ── filters ─────────────────────────────────────────────────────────────────
+  const conditions: string[] = [];
+  const params: unknown[]    = [];
+  let   idx = 1;
 
-async function ingestSymbol(symbol: string): Promise<number> {
-  const stmtData = await fetchFinMind('TaiwanStockFinancialStatements', symbol, '2024-01-01');
-  if (stmtData.length === 0) return 0;
+  const addNum = (col: string, val: string | null, op: '>=' | '<=') => {
+    if (!val) return;
+    const n = parseFloat(val);
+    if (!isNaN(n)) { conditions.push(`${col} ${op} $${idx++}`); params.push(n); }
+  };
 
-  const periodMap: Record<string, Record<string, number>> = {};
-  for (const row of stmtData) {
-    const period = dateToPeriod(row.date);
-    if (!periodMap[period]) periodMap[period] = {};
-    const field = TYPE_MAP[row.type];
-    if (field) periodMap[period][field] = row.value;
-  }
+  // price
+  addNum('dp.close', p.get('price_min'), '>=');
+  addNum('dp.close', p.get('price_max'), '<=');
 
-  let count = 0;
-  for (const [period, fields] of Object.entries(periodMap)) {
-    const revenue      = fields['revenue']      ?? null;
-    const net_income   = fields['net_income']   ?? null;
-    const eps          = fields['eps']          ?? null;
-    const gross_profit = fields['gross_profit'] ?? null;
+  // change %
+  addNum('dp.change_pct', p.get('change_pct_min'), '>=');
+  addNum('dp.change_pct', p.get('change_pct_max'), '<=');
 
-    const gross_margin = (revenue && gross_profit && revenue !== 0)
-      ? Math.round((gross_profit / revenue) * 10000) / 100 : null;
-    const net_margin = (revenue && net_income && revenue !== 0)
-      ? Math.round((net_income / revenue) * 10000) / 100 : null;
+  // volume
+  addNum('dp.volume', p.get('volume_min'), '>=');
 
-    await queryUnsafe(
-      `INSERT INTO fundamentals
-         (symbol, period, eps, revenue, net_income, gross_margin, net_margin)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (symbol, period) DO UPDATE
-         SET eps          = COALESCE(EXCLUDED.eps,          fundamentals.eps),
-             revenue      = COALESCE(EXCLUDED.revenue,      fundamentals.revenue),
-             net_income   = COALESCE(EXCLUDED.net_income,   fundamentals.net_income),
-             gross_margin = COALESCE(EXCLUDED.gross_margin, fundamentals.gross_margin),
-             net_margin   = COALESCE(EXCLUDED.net_margin,   fundamentals.net_margin)`,
-      [symbol, period, eps, revenue, net_income, gross_margin, net_margin],
-    );
-    count++;
-  }
-  return count;
-}
+  // market cap
+  addNum('f.market_cap', p.get('market_cap_min'), '>=');
+  addNum('f.market_cap', p.get('market_cap_max'), '<=');
 
-export async function POST(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret');
-  if (secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // pe / pb
+  addNum('f.pe_ratio',  p.get('pe_ratio_min'),  '>=');
+  addNum('f.pe_ratio',  p.get('pe_ratio_max'),  '<=');
+  addNum('f.pb_ratio',  p.get('pb_ratio_min'),  '>=');
+  addNum('f.pb_ratio',  p.get('pb_ratio_max'),  '<=');
+
+  // dividend yield
+  addNum('ds.latest_yield_pct', p.get('yield_min'), '>=');
+  addNum('ds.latest_yield_pct', p.get('yield_max'), '<=');
+
+  // consecutive dividend years
+  addNum('ds.consecutive_years', p.get('consecutive_years_min'), '>=');
+
+  // foreign net
+  addNum('inst.foreign_net', p.get('foreign_net_min'), '>=');
+  addNum('inst.trust_net',   p.get('trust_net_min'),   '>=');
+
+  // foreign consecutive days
+  const fcMin = p.get('foreign_consecutive_min');
+  if (fcMin) {
+    const n = parseInt(fcMin, 10);
+    if (!isNaN(n)) { conditions.push(`inst.foreign_consecutive_days >= $${idx++}`); params.push(n); }
   }
 
-  const { searchParams } = new URL(req.url);
-  const singleSymbol = searchParams.get('symbol');
+  // triple buy
+  if (p.get('triple_buy') === 'true') {
+    conditions.push(`inst.foreign_net > 0 AND inst.trust_net > 0 AND inst.dealer_net > 0`);
+  }
 
-  // Single symbol mode
-  if (singleSymbol) {
-    try {
-      const count = await ingestSymbol(singleSymbol.toUpperCase());
-      return NextResponse.json({ ok: true, symbol: singleSymbol, count });
-    } catch (err) {
-      return NextResponse.json({ error: String(err) }, { status: 500 });
+  // sector
+  const sector = p.get('sector');
+  if (sector && sector !== 'all') {
+    const sectors = sector.split(',').filter(Boolean);
+    if (sectors.length > 0) {
+      conditions.push(`s.sector = ANY($${idx++}::text[])`);
+      params.push(sectors);
     }
   }
 
-  // Batch mode
-  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+  // market
+  const market = p.get('market');
+  if (market && market !== 'all') {
+    conditions.push(`s.market = $${idx++}`);
+    params.push(market);
+  }
+
+  const WHERE = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // ── sort column mapping ──────────────────────────────────────────────────────
+  const SORT_COL: Record<string, string> = {
+    change_pct:     'dp.change_pct',
+    close:          'dp.close',
+    volume:         'dp.volume',
+    market_cap:     'f.market_cap',
+    pe_ratio:       'f.pe_ratio',
+    pb_ratio:       'f.pb_ratio',
+    dividend_yield: 'ds.latest_yield_pct',
+    margin_change:  'm.margin_change',
+    foreign_net:    'inst.foreign_net',
+  };
+  const orderCol = SORT_COL[sort_by] ?? 'dp.change_pct';
 
   try {
-    const stocks = await queryUnsafe<{ symbol: string }>(
-      `SELECT symbol FROM stocks ORDER BY symbol LIMIT 20 OFFSET $1`,
-      [offset],
-    );
+    // ── count query ────────────────────────────────────────────────────────────
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM stocks s
+      INNER JOIN daily_prices dp
+        ON dp.symbol = s.symbol
+        AND dp.date = (SELECT MAX(date) FROM daily_prices)
+      LEFT JOIN (
+        SELECT symbol,
+               pe_ratio, pb_ratio, market_cap
+        FROM fundamentals
+        WHERE period = (SELECT period FROM fundamentals ORDER BY period DESC LIMIT 1)
+      ) f ON f.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol,
+               latest_yield_pct,
+               consecutive_years
+        FROM dividend_stats
+      ) ds ON ds.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol,
+               foreign_net, trust_net, dealer_net,
+               foreign_consecutive_days
+        FROM institutional_flows
+        WHERE date = (SELECT MAX(date) FROM institutional_flows)
+      ) inst ON inst.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol, margin_change, margin_balance
+        FROM margin_data
+        WHERE date = (SELECT MAX(date) FROM margin_data)
+      ) m ON m.symbol = s.symbol
+      ${WHERE}
+    `;
 
-    let count  = 0;
-    let errors = 0;
+    // ── data query ─────────────────────────────────────────────────────────────
+    const dataSql = `
+      SELECT
+        s.symbol,
+        s.name_zh,
+        s.sector,
+        s.market,
+        dp.close,
+        dp.change_pct,
+        dp.volume,
+        dp.open,
+        dp.high,
+        dp.low,
+        f.pe_ratio,
+        f.pb_ratio,
+        f.market_cap,
+        ds.latest_yield_pct   AS dividend_yield,
+        ds.consecutive_years,
+        inst.foreign_net,
+        inst.trust_net,
+        inst.dealer_net,
+        inst.foreign_consecutive_days,
+        m.margin_change,
+        m.margin_balance
+      FROM stocks s
+      INNER JOIN daily_prices dp
+        ON dp.symbol = s.symbol
+        AND dp.date = (SELECT MAX(date) FROM daily_prices)
+      LEFT JOIN (
+        SELECT symbol,
+               pe_ratio, pb_ratio, market_cap
+        FROM fundamentals
+        WHERE period = (SELECT period FROM fundamentals ORDER BY period DESC LIMIT 1)
+      ) f ON f.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol,
+               latest_yield_pct,
+               consecutive_years
+        FROM dividend_stats
+      ) ds ON ds.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol,
+               foreign_net, trust_net, dealer_net,
+               foreign_consecutive_days
+        FROM institutional_flows
+        WHERE date = (SELECT MAX(date) FROM institutional_flows)
+      ) inst ON inst.symbol = s.symbol
+      LEFT JOIN (
+        SELECT symbol, margin_change, margin_balance
+        FROM margin_data
+        WHERE date = (SELECT MAX(date) FROM margin_data)
+      ) m ON m.symbol = s.symbol
+      ${WHERE}
+      ORDER BY ${orderCol} ${sort_dir} NULLS LAST
+      LIMIT $${idx++} OFFSET $${idx++}
+    `;
 
-    await Promise.all(stocks.map(async ({ symbol }) => {
-      try {
-        count += await ingestSymbol(symbol);
-      } catch {
-        errors++;
-      }
-    }));
+    const countParams = [...params];
+    const dataParams  = [...params, per_page, offset];
+
+    const [countRows, dataRows] = await Promise.all([
+      queryUnsafe<{ total: string }>(countSql, countParams),
+      queryUnsafe(dataSql, dataParams),
+    ]);
+
+    const total = parseInt(countRows[0]?.total ?? '0', 10);
 
     return NextResponse.json({
-      ok: true, offset,
-      processed: stocks.length,
-      next_offset: offset + 20,
-      count, errors,
+      data:    dataRows,
+      total,
+      page,
+      per_page,
+      pages: Math.ceil(total / per_page),
     });
 
   } catch (err) {
+    console.error('[screener] Error:', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
+}
+
+// Forward GET logic — POST not used but kept for compatibility
+export async function POST(req: NextRequest) {
+  return GET(req);
 }
