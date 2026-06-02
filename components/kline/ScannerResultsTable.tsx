@@ -31,11 +31,16 @@ interface Props {
 }
 
 export function ScannerResultsTable({ mode, side }: Props) {
-  const [typeFilter,  setTypeFilter]  = useState('全部');
-  const [sortBy,      setSortBy]      = useState('confidence');
+  const [typeFilter,     setTypeFilter]     = useState('全部');
+  const [sortBy,         setSortBy]         = useState('confidence');
   const [industryFilter, setIndustryFilter] = useState('全部');
 
-  const { data, isLoading, error } = useSWR('/api/kline/scanner', fetcher, {
+  // ── For afterhours mode, fetch the afterhours endpoint; scanner uses the scanner endpoint ──
+  const url = mode === 'afterhours'
+    ? `/api/kline/afterhours?side=${side ?? 'bull'}`
+    : '/api/kline/scanner';
+
+  const { data, isLoading, error } = useSWR(url, fetcher, {
     revalidateOnFocus: false,
   });
 
@@ -49,13 +54,9 @@ export function ScannerResultsTable({ mode, side }: Props) {
   const raw: any[] = data?.results ?? [];
   const totalScanned: number = data?.totalScanned ?? 0;
 
-  // Filter by side for afterhours mode
-  let filtered = mode === 'afterhours'
-    ? raw.filter(r => side === 'bull' ? r.changePercent >= 0 : r.changePercent < 0)
-    : raw;
-
-  // Filter by breakout type
-  if (typeFilter !== '全部') {
+  // For scanner mode, apply type filter
+  let filtered = [...raw];
+  if (mode === 'scanner' && typeFilter !== '全部') {
     filtered = filtered.filter(r => r.breakoutType === typeFilter);
   }
 
@@ -83,25 +84,26 @@ export function ScannerResultsTable({ mode, side }: Props) {
       {/* Summary */}
       <div style={{ fontSize: 12, color: '#8B8FA8' }}>{summaryText}</div>
 
-      {/* Filters */}
+      {/* Filters — only show type chips for scanner mode */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        {/* Type chips */}
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {BREAKOUT_TYPES.map(t => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              style={{
-                fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${typeFilter === t ? UP_COLOR : BORDER}`,
-                background: typeFilter === t ? `${UP_COLOR}22` : 'transparent',
-                color: typeFilter === t ? UP_COLOR : '#8B8FA8',
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+        {mode === 'scanner' && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {BREAKOUT_TYPES.map(t => (
+              <button
+                key={t}
+                onClick={() => setTypeFilter(t)}
+                style={{
+                  fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${typeFilter === t ? UP_COLOR : BORDER}`,
+                  background: typeFilter === t ? `${UP_COLOR}22` : 'transparent',
+                  color: typeFilter === t ? UP_COLOR : '#8B8FA8',
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Industry dropdown */}
         {industries.length > 1 && (
@@ -191,6 +193,13 @@ export function ScannerResultsTable({ mode, side }: Props) {
                         <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 600,
                           color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.color}44` }}>
                           {r.breakoutType}
+                        </span>
+                      ) : r.signalLabel ? (
+                        <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 600,
+                          color: side === 'bear' ? DN_COLOR : UP_COLOR,
+                          background: side === 'bear' ? `${DN_COLOR}22` : `${UP_COLOR}22`,
+                          border: `1px solid ${side === 'bear' ? DN_COLOR : UP_COLOR}44` }}>
+                          {r.signalLabel}
                         </span>
                       ) : (
                         <span style={{ color: '#8B8FA8' }}>—</span>
