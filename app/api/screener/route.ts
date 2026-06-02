@@ -6,7 +6,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
-
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
 
 const TYPE_MAP: Record<string, string> = {
