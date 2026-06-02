@@ -173,14 +173,14 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
 export async function fetchMarginData(): Promise<RawMarginData[]> {
   try {
     type TWSEMargin = {
-      '股票代號': string;
-      '融資買進': string;
-      '融資賣出': string;
-      '融資餘額': string;
+      '股票代號':     string;
+      '融資買進':     string;
+      '融資賣出':     string;
+      '融資今日餘額': string;
       '融資前日餘額': string;
-      '融券賣出': string;
-      '融券買進': string;
-      '融券餘額': string;
+      '融券賣出':     string;
+      '融券買進':     string;
+      '融券今日餘額': string;
       '融券前日餘額': string;
     };
 
@@ -188,18 +188,18 @@ export async function fetchMarginData(): Promise<RawMarginData[]> {
     return rows
       .filter(r => r['股票代號'])
       .map(r => {
-        const margin_balance = parseNum(r['融資餘額']);
-        const short_balance  = parseNum(r['融券餘額']);
+        const margin_balance = parseNum(r['融資今日餘額']);
+        const short_balance  = parseNum(r['融券今日餘額']);
         return {
-          symbol:         r['股票代號'].trim(),
-          margin_buy:     parseNum(r['融資買進']),
-          margin_sell:    parseNum(r['融資賣出']),
+          symbol:        r['股票代號'].trim(),
+          margin_buy:    parseNum(r['融資買進']),
+          margin_sell:   parseNum(r['融資賣出']),
           margin_balance,
-          margin_change:  margin_balance - parseNum(r['融資前日餘額']),
-          short_sell:     parseNum(r['融券賣出']),
-          short_buy:      parseNum(r['融券買進']),
+          margin_change: margin_balance - parseNum(r['融資前日餘額']),
+          short_sell:    parseNum(r['融券賣出']),
+          short_buy:     parseNum(r['融券買進']),
           short_balance,
-          short_change:   short_balance - parseNum(r['融券前日餘額']),
+          short_change:  short_balance - parseNum(r['融券前日餘額']),
         };
       });
   } catch (err) {
