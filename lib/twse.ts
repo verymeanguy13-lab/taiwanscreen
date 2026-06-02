@@ -212,7 +212,7 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
   try {
     type TWSEStockInfo = { '公司代號': string; '公司簡稱': string; '產業類別': string };
 
-    // ── TWSE (上市) ──────────────────────────────────────────────────────────
+    // ── TWSE (上市) — JSON API ────────────────────────────────────────────────
     const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
     const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
@@ -223,19 +223,29 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
         market:  'TWSE' as const,
       }));
 
-    // ── TPEx (上櫃) ──────────────────────────────────────────────────────────
+    // ── TPEx (上櫃) — ISIN HTML endpoint (JSON endpoint is broken) ────────────
     let tpexStocks: RawStockInfo[] = [];
     try {
-      const tpexRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_R');
-      tpexStocks = tpexRows
-        .filter(r => r['公司代號'])
-        .map(r => ({
-          symbol:  r['公司代號'].trim(),
-          name_zh: r['公司簡稱']?.trim() ?? '',
-          sector:  r['產業類別']?.trim() ?? '',
-          market:  'TPEx' as const,
-        }));
-      console.log(`[fetchStockList] TPEx: ${tpexStocks.length} stocks`);
+      const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=4', {
+        headers: { 'Accept': 'text/html' },
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const html = await res.text();
+        // Each row looks like: <td bgcolor=#FAFAD2>6156　松上</td>...<td>上櫃</td>...<td>電子零組件業</td>
+        const rowRegex = /<tr>[\s\S]*?<td[^>]*>(\d{4,6}[A-Z0-9]*)\u3000([^<]+)<\/td>[\s\S]*?<td[^>]*>[^<]*<\/td>[\s\S]*?<td[^>]*>上櫃<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/g;
+        let match;
+        while ((match = rowRegex.exec(html)) !== null) {
+          const symbol  = match[1].trim();
+          const name_zh = match[2].trim();
+          const sector  = match[3].trim();
+          // Skip bonds, warrants, ETNs — only 4-digit stock codes
+          if (/^\d{4}$/.test(symbol)) {
+            tpexStocks.push({ symbol, name_zh, sector, market: 'TPEx' as const });
+          }
+        }
+        console.log(`[fetchStockList] TPEx: ${tpexStocks.length} stocks`);
+      }
     } catch (err) {
       console.error('[fetchStockList] TPEx fetch failed:', err);
     }
