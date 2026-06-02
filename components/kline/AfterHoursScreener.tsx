@@ -28,7 +28,6 @@ const WORKFLOW_STEPS = [
   { step: 4, text: '本清單僅供技術面觀察，不構成買賣建議' },
 ];
 
-// Convert scanner result to ScanResult shape that StockSignalCard expects
 function toScanResult(r: any, side: 'bull' | 'bear'): ScanResult {
   return {
     symbol:        r.symbol,
@@ -94,27 +93,21 @@ function FilterChips({ filters, active, onSelect, color }: { filters: string[]; 
 }
 
 export function AfterHoursScreener() {
-  const { data, isLoading, error } = useSWR('/api/kline/scanner', fetcher, {
-    revalidateOnFocus: false,
-  });
+  const { data: bullData, isLoading: bullLoading } = useSWR('/api/kline/afterhours?side=bull', fetcher, { revalidateOnFocus: false });
+  const { data: bearData, isLoading: bearLoading, error } = useSWR('/api/kline/afterhours?side=bear', fetcher, { revalidateOnFocus: false });
+  const isLoading = bullLoading || bearLoading;
 
   const [activeTab,  setActiveTab]  = useState<'bull' | 'bear'>('bull');
   const [bullFilter, setBullFilter] = useState<string | null>(null);
   const [bearFilter, setBearFilter] = useState<string | null>(null);
 
-  // Scanner returns { results, totalScanned, signalCounts }
-  // Split into bull (positive changePercent or uptrend breakout) and bear
-  const rawResults: any[] = data?.results ?? [];
+  const bullResults: ScanResult[] = (bullData?.results ?? [])
+    .sort((a: any, b: any) => b.confidence - a.confidence)
+    .map((r: any) => toScanResult(r, 'bull'));
 
-  const bullResults: ScanResult[] = rawResults
-    .filter(r => r.changePercent >= 0 || r.breakoutType === '上漲趨勢突破' || r.breakoutType === '箱型整理突破')
-    .sort((a, b) => b.confidence - a.confidence)
-    .map(r => toScanResult(r, 'bull'));
-
-  const bearResults: ScanResult[] = rawResults
-    .filter(r => r.changePercent < 0 || r.breakoutType === '下跌V轉突破')
-    .sort((a, b) => b.confidence - a.confidence)
-    .map(r => toScanResult(r, 'bear'));
+  const bearResults: ScanResult[] = (bearData?.results ?? [])
+    .sort((a: any, b: any) => b.confidence - a.confidence)
+    .map((r: any) => toScanResult(r, 'bear'));
 
   const filteredBull = bullFilter
     ? bullResults.filter(r => r.yesterdayTrend === bullFilter)
@@ -140,7 +133,7 @@ export function AfterHoursScreener() {
     );
   }
 
-  const totalCount = rawResults.length;
+  const totalCount = bullResults.length + bearResults.length;
 
   return (
     <div style={{ background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
