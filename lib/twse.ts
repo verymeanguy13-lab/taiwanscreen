@@ -140,30 +140,62 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
 
 export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]> {
   try {
-    const rows = await twseFetch<Record<string, string>>('/v1/fund/T86');
-    if (rows.length === 0) return [];
+    // Use TWSE scraping endpoint — the OpenAPI /v1/fund/T86 is unreliable (returns HTML)
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const url = `https://www.twse.com.tw/fund/T86?response=json&date=${dateStr}&selectType=ALL`;
 
-    return rows
-      .filter(r => r['證券代號'] && r['證券代號'].trim())
-      .map(r => {
-        const foreign_buy  = parseNum(r['外陸資買進股數']);
-        const foreign_sell = parseNum(r['外陸資賣出股數']);
-        const foreign_net  = parseNum(r['外陸資淨買股數']) || (foreign_buy - foreign_sell);
-        const trust_buy    = parseNum(r['投信買進股數']);
-        const trust_sell   = parseNum(r['投信賣出股數']);
-        const trust_net    = parseNum(r['投信淨買股數']) || (trust_buy - trust_sell);
-        const dealer_buy   = parseNum(r['自營商買進股數(自行買賣)']) + parseNum(r['自營商買進股數(避險)']);
-        const dealer_sell  = parseNum(r['自營商賣出股數(自行買賣)']) + parseNum(r['自營商賣出股數(避險)']);
-        const dealer_net   = (parseNum(r['自營商淨買股數(自行買賣)']) + parseNum(r['自營商淨買股數(避險)'])) || (dealer_buy - dealer_sell);
-        const total_net    = parseNum(r['三大法人買賣超股數']) || (foreign_net + trust_net + dealer_net);
-        return {
-          symbol: r['證券代號'].trim(),
-          foreign_buy, foreign_sell, foreign_net,
-          trust_buy, trust_sell, trust_net,
-          dealer_buy, dealer_sell, dealer_net,
-          total_net,
-        };
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+    if (!res.ok) {
+      console.error(`[fetchInstitutionalFlows] HTTP ${res.status}`);
+      return [];
+    }
+
+    const json = await res.json();
+    if (!json || json.stat !== 'OK' || !Array.isArray(json.data)) {
+      console.error('[fetchInstitutionalFlows] No data or bad stat:', json?.stat);
+      return [];
+    }
+
+    // Column order from T86 response:
+    // [0] symbol, [1] name,
+    // [2] foreign_buy, [3] foreign_sell, [4] foreign_net,
+    // [5] foreign_buy2, [6] foreign_sell2, [7] foreign_net2,  (mainland China subset)
+    // [8] trust_buy, [9] trust_sell, [10] trust_net,
+    // [11] dealer_self_net,
+    // [12] dealer_self_buy, [13] dealer_self_sell, [14] dealer_self_net2,
+    // [15] dealer_hedge_buy, [16] dealer_hedge_sell, [17] dealer_hedge_net,
+    // [18] total_net
+
+    const results: RawInstitutionalFlow[] = [];
+
+    for (const row of json.data) {
+      const symbol = String(row[0]).trim();
+      // Only 4-digit stock symbols (skip warrants, ETFs with letters, etc.)
+      if (!/^\d{4}$/.test(symbol)) continue;
+
+      const foreign_buy  = parseNum(row[2]);
+      const foreign_sell = parseNum(row[3]);
+      const foreign_net  = parseNum(row[4]) || (foreign_buy - foreign_sell);
+      const trust_buy    = parseNum(row[8]);
+      const trust_sell   = parseNum(row[9]);
+      const trust_net    = parseNum(row[10]) || (trust_buy - trust_sell);
+      const dealer_buy   = parseNum(row[12]) + parseNum(row[15]);
+      const dealer_sell  = parseNum(row[13]) + parseNum(row[16]);
+      const dealer_net   = (dealer_buy - dealer_sell);
+      const total_net    = parseNum(row[18]) || (foreign_net + trust_net + dealer_net);
+
+      results.push({
+        symbol,
+        foreign_buy, foreign_sell, foreign_net,
+        trust_buy, trust_sell, trust_net,
+        dealer_buy, dealer_sell, dealer_net,
+        total_net,
       });
+    }
+
+    console.log(`[fetchInstitutionalFlows] Fetched ${results.length} stocks`);
+    return results;
   } catch (err) {
     console.error('[fetchInstitutionalFlows] Unexpected error:', err);
     return [];
