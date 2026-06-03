@@ -143,7 +143,10 @@ export async function GET(req: NextRequest) {
            LEFT JOIN daily_prices dp
              ON m.symbol = dp.symbol
              AND dp.date = m.date
-           WHERE m.date = (SELECT MAX(date) FROM margin_data)
+           WHERE m.date = (
+             SELECT MAX(m2.date) FROM margin_data m2
+             JOIN institutional_flows i2 ON m2.date = i2.date
+           )
              AND m.short_balance > 0
              AND i.foreign_consecutive_days >= 3
            ORDER BY squeeze_score DESC
