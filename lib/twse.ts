@@ -127,7 +127,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
     type TWSEStockDay = {
       Code:          string;
       Name:          string;
-      TradeVolume:   string;
+      TradeVolume:   string;  // TWSE uses TradeVolume
       OpeningPrice:  string;
       HighestPrice:  string;
       LowestPrice:   string;
@@ -147,7 +147,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
         return {
           symbol:     r.Code.trim(),
           name_zh:    r.Name.trim(),
-          volume:     parseNum(r.TradeVolume),
+          volume:     parseNum(r.TradeVolume),  // TWSE: TradeVolume
           open:       parseNum(r.OpeningPrice),
           high:       parseNum(r.HighestPrice),
           low:        parseNum(r.LowestPrice),
@@ -168,7 +168,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
       Low:                   string;
       Close:                 string;
       Change:                string;
-      TradeVolume:           string;
+      TradingShares:         string;  // TPEx uses TradingShares
     };
 
     let tpexPrices: RawStockPrice[] = [];
@@ -185,7 +185,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
           return {
             symbol:     r.SecuritiesCompanyCode.trim(),
             name_zh:    r.CompanyName?.trim() ?? '',
-            volume:     parseNum(r.TradeVolume),
+            volume:     parseNum(r.TradingShares),  // TPEx: TradingShares
             open:       parseNum(r.Open),
             high:       parseNum(r.High),
             low:        parseNum(r.Low),
@@ -215,7 +215,6 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
 
 export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]> {
   try {
-    // Use TWSE scraping endpoint — the OpenAPI /v1/fund/T86 is unreliable (returns HTML)
     const today = new Date();
     const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
     const url = `https://www.twse.com.tw/fund/T86?response=json&date=${dateStr}&selectType=ALL`;
@@ -236,7 +235,6 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
 
     for (const row of json.data) {
       const symbol = String(row[0]).trim();
-      // Only 4-digit stock symbols (skip warrants, ETFs with letters, etc.)
       if (!/^\d{4}$/.test(symbol)) continue;
 
       const foreign_buy  = parseNum(row[2]);
@@ -309,7 +307,6 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
   try {
     type TWSEStockInfo = { '公司代號': string; '公司簡稱': string; '產業類別': string };
 
-    // ── TWSE (上市) — JSON API ────────────────────────────────────────────────
     const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
     const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
@@ -320,7 +317,6 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
         market:  'TWSE' as const,
       }));
 
-    // ── TPEx (上櫃) — ISIN HTML endpoint (JSON endpoint is broken) ────────────
     let tpexStocks: RawStockInfo[] = [];
     try {
       const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=4', {
