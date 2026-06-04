@@ -5,34 +5,6 @@ import Link from 'next/link';
 import useSWR from 'swr';
 import { PTTWidget } from '@/components/stock/PTTWidget';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface MarketSummary {
-  up: number;
-  down: number;
-  flat: number;
-  volume: number;
-}
-
-interface TopForeignBuy {
-  symbol: string;
-  name: string;
-  net: number;
-}
-
-interface TripleBuy {
-  symbol: string;
-  name: string;
-  score: number;
-}
-
-interface UpcomingDividend {
-  symbol: string;
-  name: string;
-  exDate: string;
-  yield: number;
-}
-
 // ── Fetcher ──────────────────────────────────────────────────────────────────
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -81,7 +53,7 @@ function LiveMarketBar() {
     refreshInterval: 0, shouldRetryOnError: false,
   });
 
-  const summary = data?.data?.marketSummary;
+  const summary = data?.marketSummary ?? data?.data?.marketSummary;
 
   if (error || !summary) {
     return (
@@ -125,23 +97,26 @@ function FeatureCard({ icon, title, desc, href }: { icon: string; title: string;
 }
 
 function TopForeignBuyColumn() {
-  const { data, error } = useSWR<TopForeignBuy[]>('/api/institutional?mode=top_foreign_buy&limit=5', fetcher, { shouldRetryOnError: false });
+  const { data: res, error } = useSWR('/api/institutional?mode=top_foreign_buy&limit=5', fetcher, { shouldRetryOnError: false });
+  const items = Array.isArray(res?.data) ? res.data : [];
   return (
     <div className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>📈 外資買超前5名</h3>
-      {!data && !error ? <Skeleton rows={5} /> : error ? (
+      {!res && !error ? <Skeleton rows={5} /> : error ? (
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>資料載入失敗</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暫無資料</p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(Array.isArray(data) ? data : []).map((item, i) => (
+          {items.map((item: any, i: number) => (
             <li key={item.symbol} className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
               style={{ backgroundColor: 'var(--bg-secondary)' }}>
               <span style={{ color: 'var(--text-secondary)' }} className="w-4 shrink-0">{i + 1}</span>
               <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
-                {item.symbol} {item.name}
+                {item.symbol} {item.name_zh}
               </Link>
               <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-green)' }}>
-                +{item.net.toFixed(1)}億
+                +{(item.foreign_net / 100_000_000).toFixed(1)}億
               </span>
             </li>
           ))}
@@ -152,21 +127,26 @@ function TopForeignBuyColumn() {
 }
 
 function TripleBuyColumn() {
-  const { data, error } = useSWR<TripleBuy[]>('/api/institutional?mode=triple_buy', fetcher, { shouldRetryOnError: false });
+  const { data: res, error } = useSWR('/api/institutional?mode=triple_buy', fetcher, { shouldRetryOnError: false });
+  const items = Array.isArray(res?.data) ? res.data : [];
   return (
     <div className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>🔥 三買訊號今日</h3>
-      {!data && !error ? <Skeleton rows={5} /> : error ? (
+      {!res && !error ? <Skeleton rows={5} /> : error ? (
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>資料載入失敗</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暫無資料</p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(Array.isArray(data) ? data : []).map(item => (
+          {items.slice(0, 5).map((item: any) => (
             <li key={item.symbol} className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
               style={{ backgroundColor: 'var(--bg-secondary)' }}>
               <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
-                {item.symbol} {item.name}
+                {item.symbol} {item.name_zh}
               </Link>
-              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-green)' }}>★{item.score}</span>
+              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-green)' }}>
+                {item.total_net != null ? `+${(item.total_net / 100_000_000).toFixed(1)}億` : '三買'}
+              </span>
             </li>
           ))}
         </ul>
@@ -176,26 +156,37 @@ function TripleBuyColumn() {
 }
 
 function UpcomingDividendColumn() {
-  const { data, error } = useSWR<UpcomingDividend[]>('/api/dividend?mode=upcoming', fetcher, { shouldRetryOnError: false });
+  const { data: res, error } = useSWR('/api/dividend?mode=upcoming', fetcher, { shouldRetryOnError: false });
+  const items = Array.isArray(res?.data?.rows) ? res.data.rows : Array.isArray(res?.data) ? res.data : [];
   return (
     <div className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>💰 近期除息股</h3>
-      {!data && !error ? <Skeleton rows={5} /> : error ? (
+      {!res && !error ? <Skeleton rows={5} /> : error ? (
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>資料載入失敗</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暫無資料</p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {(Array.isArray(data) ? data : []).map(item => (
-            <li key={item.symbol} className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
-              style={{ backgroundColor: 'var(--bg-secondary)' }}>
-              <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
-                {item.symbol} {item.name}
-              </Link>
-              <div className="flex flex-col items-end gap-0.5">
-                <span style={{ color: 'var(--text-secondary)' }}>{item.exDate}</span>
-                <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-blue)' }}>{item.yield.toFixed(2)}%</span>
-              </div>
-            </li>
-          ))}
+          {items.slice(0, 5).map((item: any) => {
+            const exDate = item.ex_dividend_date
+              ? String(item.ex_dividend_date).slice(0, 10)
+              : item.exDate ?? '—';
+            const dividend = item.cash_dividend ?? item.yield ?? 0;
+            return (
+              <li key={item.symbol} className="flex items-center justify-between rounded px-2 py-1.5 text-xs"
+                style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {item.symbol} {item.name_zh ?? item.name}
+                </Link>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span style={{ color: 'var(--text-secondary)' }}>{exDate}</span>
+                  <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-blue)' }}>
+                    ${Number(dividend).toFixed(2)}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -308,7 +299,6 @@ function AccuracyTeaserSection() {
     <section className="border-t" style={{ borderColor: 'var(--border)' }}>
       <div className="mx-auto max-w-screen-xl px-4 py-12">
 
-        {/* Header row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
           <div>
             <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)', marginBottom: 12 }}>
@@ -323,9 +313,9 @@ function AccuracyTeaserSection() {
             ) : (
               <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                 {[
-                  { label: '條件後上漲比例', value: `${priceUpRate}%`,                  color: priceUpRate >= 50 ? 'var(--accent-green)' : 'var(--accent-red)' },
+                  { label: '條件後上漲比例', value: `${priceUpRate}%`, color: priceUpRate >= 50 ? 'var(--accent-green)' : 'var(--accent-red)' },
                   { label: '平均10日報酬',   value: `${avgReturn >= 0 ? '+' : ''}${avgReturn}%`, color: avgReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' },
-                  { label: '累計訊號次數',   value: total.toLocaleString(),              color: 'var(--text-primary)' },
+                  { label: '累計訊號次數',   value: total.toLocaleString(), color: 'var(--text-primary)' },
                 ].map(({ label, value, color }) => (
                   <div key={label}>
                     <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
@@ -346,7 +336,6 @@ function AccuracyTeaserSection() {
           </Link>
         </div>
 
-        {/* Top 3 winning signals */}
         {!isLoading && topSignals.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {topSignals.map((s: any) => {
@@ -460,7 +449,7 @@ export default function HomePage() {
       {/* Scanner Section */}
       <ScannerSection />
 
-      {/* ── Accuracy Teaser — NEW ── */}
+      {/* Accuracy Teaser */}
       <AccuracyTeaserSection />
 
       {/* Why Us */}
