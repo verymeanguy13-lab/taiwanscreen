@@ -127,7 +127,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
     type TWSEStockDay = {
       Code:          string;
       Name:          string;
-      TradeVolume:   string;  // TWSE uses TradeVolume
+      TradeVolume:   string;
       OpeningPrice:  string;
       HighestPrice:  string;
       LowestPrice:   string;
@@ -147,7 +147,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
         return {
           symbol:     r.Code.trim(),
           name_zh:    r.Name.trim(),
-          volume:     parseNum(r.TradeVolume),  // TWSE: TradeVolume
+          volume:     parseNum(r.TradeVolume),
           open:       parseNum(r.OpeningPrice),
           high:       parseNum(r.HighestPrice),
           low:        parseNum(r.LowestPrice),
@@ -168,7 +168,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
       Low:                   string;
       Close:                 string;
       Change:                string;
-      TradingShares:         string;  // TPEx uses TradingShares
+      TradingShares:         string;
     };
 
     let tpexPrices: RawStockPrice[] = [];
@@ -185,7 +185,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
           return {
             symbol:     r.SecuritiesCompanyCode.trim(),
             name_zh:    r.CompanyName?.trim() ?? '',
-            volume:     parseNum(r.TradingShares),  // TPEx: TradingShares
+            volume:     parseNum(r.TradingShares),
             open:       parseNum(r.Open),
             high:       parseNum(r.High),
             low:        parseNum(r.Low),
@@ -217,9 +217,14 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
   try {
     const today = new Date();
     const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const url = `https://www.twse.com.tw/fund/T86?response=json&date=${dateStr}&selectType=ALL`;
 
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+    // Use rwd endpoint — more reliable column layout
+    const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${dateStr}&selectType=ALLBUT0999`;
+
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible)' },
+      cache: 'no-store',
+    });
     if (!res.ok) {
       console.error(`[fetchInstitutionalFlows] HTTP ${res.status}`);
       return [];
@@ -231,11 +236,32 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
       return [];
     }
 
+    // rwd/T86 column order (ALLBUT0999):
+    // [0]  證券代號
+    // [1]  證券名稱
+    // [2]  外陸資買進(不含外資自營商)
+    // [3]  外陸資賣出(不含外資自營商)
+    // [4]  外陸資買賣超(不含外資自營商)
+    // [5]  外資自營商買進
+    // [6]  外資自營商賣出
+    // [7]  外資自營商買賣超
+    // [8]  投信買進
+    // [9]  投信賣出
+    // [10] 投信買賣超
+    // [11] 自營商買賣超(合計)
+    // [12] 自營商買進(自行買賣)
+    // [13] 自營商賣出(自行買賣)
+    // [14] 自營商買賣超(自行買賣)
+    // [15] 自營商買進(避險)
+    // [16] 自營商賣出(避險)
+    // [17] 自營商買賣超(避險)
+    // [18] 三大法人買賣超合計
+
     const results: RawInstitutionalFlow[] = [];
 
     for (const row of json.data) {
       const symbol = String(row[0]).trim();
-      if (!/^\d{4}$/.test(symbol)) continue;
+      if (!/^\d{4,6}$/.test(symbol)) continue;
 
       const foreign_buy  = parseNum(row[2]);
       const foreign_sell = parseNum(row[3]);
@@ -245,7 +271,7 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
       const trust_net    = parseNum(row[10]) || (trust_buy - trust_sell);
       const dealer_buy   = parseNum(row[12]) + parseNum(row[15]);
       const dealer_sell  = parseNum(row[13]) + parseNum(row[16]);
-      const dealer_net   = (dealer_buy - dealer_sell);
+      const dealer_net   = parseNum(row[11]) || (dealer_buy - dealer_sell);
       const total_net    = parseNum(row[18]) || (foreign_net + trust_net + dealer_net);
 
       results.push({
