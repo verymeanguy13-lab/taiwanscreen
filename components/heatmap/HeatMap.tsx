@@ -11,6 +11,7 @@ export interface HeatMapStockData {
   change_pct: number | null;
   volume:     number | null;
   market_cap: number | null;
+  close?:     number | null;
 }
 
 export interface HeatMapSector {
@@ -49,9 +50,17 @@ function textColor(pct: number): string {
   return '#FFFFFF';
 }
 
-// ── Sector label height ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const LABEL_H  = 18;
 const PADDING  = 2;
+
+// Returns a size value for a stock — falls back to close price if volume/market_cap is 0
+function getStockSize(st: HeatMapStockData, sizeBy: 'market_cap' | 'volume'): number {
+  const primary = sizeBy === 'market_cap' ? (st.market_cap ?? 0) : (st.volume ?? 0);
+  if (primary > 0) return primary;
+  // Fallback: use close price so TPEx stocks (no volume data) still render
+  return Math.max(st.close ?? 1, 1);
+}
 
 export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight, containerRef }: HeatMapProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
@@ -61,10 +70,7 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight, cont
 
     const sectorTotals = sectors.map(sec => ({
       ...sec,
-      total: sec.stocks.reduce((s, st) => {
-        const v = sizeBy === 'market_cap' ? (st.market_cap ?? 0) : (st.volume ?? 0);
-        return s + Math.max(v, 0);
-      }, 0),
+      total: sec.stocks.reduce((s, st) => s + getStockSize(st, sizeBy), 0),
     })).filter(s => s.total > 0);
 
     const grandTotal = sectorTotals.reduce((s, sec) => s + sec.total, 0);
@@ -95,7 +101,7 @@ export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight, cont
         symbol:     st.symbol,
         name_zh:    st.name_zh,
         change_pct: st.change_pct ?? 0,
-        value:      Math.max(sizeBy === 'market_cap' ? (st.market_cap ?? 0) : (st.volume ?? 0), 0),
+        value:      getStockSize(st, sizeBy),
       }));
 
       const stockRects = squarify(stockItems, stockBounds);
