@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
          )
        WHERE s.market IN ('TWSE', 'TPEx')
        ${marketFilter}
-       AND dp.volume > 0
+       AND dp.close > 0
        ORDER BY dp.volume DESC`,
       [],
     );
