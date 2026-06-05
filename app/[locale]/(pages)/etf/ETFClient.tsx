@@ -404,10 +404,12 @@ export default function ETFClient() {
           </div>
         )}
 
-        {/* ── Ad slot ─────────────────────────────────────────────────────── */}
+        {/* ── Ad slot — suppressHydrationWarning to prevent hydration mismatch ── */}
         {!comparing && (
-          <div className="flex justify-center">
-            <AdSlot size="leaderboard" slotId="etf-top" />
+          <div className="flex justify-center" suppressHydrationWarning>
+            <div suppressHydrationWarning>
+              <AdSlot size="leaderboard" slotId="etf-top" />
+            </div>
           </div>
         )}
 
