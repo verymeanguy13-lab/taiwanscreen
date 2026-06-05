@@ -100,13 +100,17 @@ function ETFCard({
   onToggle: () => void;
   disabled: boolean;
 }) {
+  const canSelect = selected || !disabled;
+
   return (
     <div
+      onClick={canSelect ? onToggle : undefined}
       className="flex flex-col gap-3 rounded-xl p-4 transition-all duration-150"
       style={{
         backgroundColor: selected ? 'rgba(0,212,170,0.06)' : 'var(--bg-card)',
         border: selected ? '2px solid var(--accent-green)' : '1px solid var(--border)',
-        cursor: 'default',
+        cursor: canSelect ? 'pointer' : 'not-allowed',
+        opacity: disabled && !selected ? 0.5 : 1,
       }}
     >
       <div className="flex items-start justify-between gap-2">
@@ -121,17 +125,16 @@ function ETFCard({
             {etf.name_zh}
           </div>
         </div>
-        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs"
-          style={{ color: selected ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-          <input
-            type="checkbox"
-            checked={selected}
-            disabled={disabled && !selected}
-            onChange={onToggle}
-            style={{ accentColor: 'var(--accent-green)', cursor: disabled && !selected ? 'not-allowed' : 'pointer' }}
-          />
-          比較
-        </label>
+        <div
+          className="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium"
+          style={{
+            backgroundColor: selected ? 'rgba(0,212,170,0.15)' : 'var(--bg-secondary)',
+            color: selected ? 'var(--accent-green)' : 'var(--text-muted)',
+            border: `1px solid ${selected ? 'var(--accent-green)' : 'var(--border)'}`,
+          }}
+        >
+          {selected ? '✓ 已選' : '+ 比較'}
+        </div>
       </div>
 
       <div>
@@ -351,9 +354,29 @@ export default function ETFClient() {
             ETF 比較
           </h1>
           <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-            勾選最多4支ETF進行比較，或使用投資人類型推薦功能
+            點擊ETF卡片選取（最多4支），然後點擊下方按鈕開始比較
           </p>
         </div>
+
+        {/* ── Selected count banner ───────────────────────────────────────── */}
+        {selectedSymbols.length > 0 && !comparing && (
+          <div className="flex items-center justify-between rounded-lg px-4 py-2.5 text-sm"
+            style={{ backgroundColor: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.25)' }}>
+            <span style={{ color: 'var(--accent-green)' }}>
+              已選 {selectedSymbols.length} 支：{selectedSymbols.join('、')}
+            </span>
+            <div className="flex gap-2">
+              <button onClick={handleReset} className="text-xs px-3 py-1 rounded"
+                style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                清除
+              </button>
+              <button onClick={handleCompare} className="text-xs px-3 py-1 rounded font-semibold"
+                style={{ backgroundColor: 'var(--accent-green)', color: 'var(--bg-primary)' }}>
+                開始比較 →
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Comparison table (view 2) ───────────────────────────────────── */}
         {comparing && selectedEtfs.length > 0 && (
@@ -375,13 +398,13 @@ export default function ETFClient() {
             {allEtfs.length === 0 && (
               <div className="col-span-3 py-12 text-center text-sm"
                 style={{ color: 'var(--text-muted)' }}>
-                暫無ETF資料。請先執行 POST /api/etf 種子資料。
+                暫無ETF資料
               </div>
             )}
           </div>
         )}
 
-        {/* ── Ad slot — below ETF browser grid ───────────────────────────── */}
+        {/* ── Ad slot ─────────────────────────────────────────────────────── */}
         {!comparing && (
           <div className="flex justify-center">
             <AdSlot size="leaderboard" slotId="etf-top" />
@@ -392,27 +415,6 @@ export default function ETFClient() {
         <RecommendWidget allEtfs={allEtfs} />
 
       </div>
-
-      {/* ── Floating compare button ─────────────────────────────────────── */}
-      {selectedSymbols.length > 0 && !comparing && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
-          <button
-            onClick={handleCompare}
-            className="flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold shadow-xl transition-transform duration-100 hover:scale-105"
-            style={{
-              backgroundColor: 'var(--accent-green)',
-              color: 'var(--bg-primary)',
-            }}
-          >
-            開始比較 ({selectedSymbols.length})
-            <span className="flex gap-1">
-              {selectedSymbols.map(s => (
-                <span key={s} className="rounded bg-white/20 px-1.5 py-0.5 text-xs">{s}</span>
-              ))}
-            </span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
