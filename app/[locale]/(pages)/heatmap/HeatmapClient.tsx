@@ -2,8 +2,7 @@
 
 import { useRef, useState, useEffect } from 'react';
 import useSWR from 'swr';
-import { HeatMap }      from '@/components/heatmap/HeatMap';
-import type { HeatMapSector } from '@/components/heatmap/HeatMap';
+import { HeatMap, type HeatMapSector } from '@/components/heatmap/HeatMap';
 import { Skeleton }     from '@/components/ui/Skeleton';
 import AdSlot           from '@/components/ads/AdSlot';
 
