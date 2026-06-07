@@ -1,165 +1,240 @@
-'use client';
+﻿'use client';
 
-import { useRef, useState, useEffect } from 'react';
-import useSWR from 'swr';
-import { HeatMap }      from '@/components/heatmap/HeatMap';
-import type { HeatMapSector } from '@/components/heatmap/HeatMap';
-import { Skeleton }     from '@/components/ui/Skeleton';
-import AdSlot           from '@/components/ads/AdSlot';
+import { useMemo, useState } from 'react';
+import { squarify } from '@/lib/treemap';
+import type { Bounds, LayoutRect } from '@/lib/treemap';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+// ?? Types ?????????????????????????????????????????????????????????????????????
+export interface HeatMapStockData {
+  symbol:     string;
+  name_zh:    string;
+  change_pct: number | null;
+  volume:     number | null;
+  market_cap: number | null;
+  close?:     number | null;
+}
 
-const MARKET_TABS = [
-  { label: '全部',  value: 'all'  },
-  { label: '上市',  value: 'TWSE' },
-  { label: '上櫃',  value: 'TPEx' },
-];
+export interface HeatMapSector {
+  name:   string;
+  stocks: HeatMapStockData[];
+}
 
-const SIZE_TABS = [
-  { label: '市值', value: 'market_cap' },
-  { label: '成交量', value: 'volume'   },
-];
+interface HeatMapProps {
+  sectors:         HeatMapSector[];
+  sizeBy:          'market_cap' | 'volume';
+  containerWidth:  number;
+  containerHeight: number;
+  containerRef?:   React.RefObject<HTMLDivElement | null>;
+}
 
-export default function HeatmapClient() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [market,  setMarket]  = useState('all');
-  const [sizeBy,  setSizeBy]  = useState<'market_cap' | 'volume'>('market_cap');
-  const [dims,    setDims]    = useState({ w: 0, h: 0 });
+interface Tooltip {
+  x: number;
+  y: number;
+  symbol: string;
+  name_zh: string;
+  change_pct: number;
+}
 
-  const { data, isLoading } = useSWR(
-    `/api/heatmap?market=${market}&size_by=${sizeBy}`,
-    fetcher,
-    { refreshInterval: 60_000 },
-  );
+// ?? Color function ????????????????????????????????????????????????????????????
+export function changeToColor(pct: number): string {
+  if (pct >=  5) return '#005F46';
+  if (pct >=  2) return '#00D4AA';
+  if (pct >=  0) return '#4DFFCC';
+  if (pct >= -2) return '#FF9AA2';
+  if (pct >= -5) return '#FF4D6D';
+  return '#7B0000';
+}
 
-  useEffect(() => {
-    function measure() {
-      if (!containerRef.current) return;
-      const w = containerRef.current.offsetWidth;
-      setDims({ w, h: Math.max(500, Math.round(w * 0.6)) });
-    }
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, []);
+function textColor(pct: number): string {
+  if (pct >= 0 && pct < 2) return '#003322';
+  return '#FFFFFF';
+}
 
-  const sectors: HeatMapSector[] = data?.sectors ?? [];
-  const summary = data?.marketSummary;
+// ?? Helpers ???????????????????????????????????????????????????????????????????
+const LABEL_H  = 18;
+const PADDING  = 2;
+
+// Returns a size value for a stock ??falls back to close price if volume/market_cap is 0
+function getStockSize(st: HeatMapStockData, sizeBy: 'market_cap' | 'volume'): number {
+  const primary = sizeBy === 'market_cap' ? (st.market_cap ?? 0) : (st.volume ?? 0);
+  if (primary > 0) return primary;
+  // Fallback: use close price so TPEx stocks (no volume data) still render
+  return Math.max(st.close ?? 1, 1);
+}
+
+export function HeatMap({ sectors, sizeBy, containerWidth, containerHeight, containerRef }: HeatMapProps) {
+  const [tooltip, setTooltip] = useState<Tooltip | null>(null);
+
+  const sectorLayouts = useMemo(() => {
+    if (containerWidth <= 0 || containerHeight <= 0) return [];
+
+    const sectorTotals = sectors.map(sec => ({
+      ...sec,
+      total: sec.stocks.reduce((s, st) => s + getStockSize(st, sizeBy), 0),
+    })).filter(s => s.total > 0);
+
+    const grandTotal = sectorTotals.reduce((s, sec) => s + sec.total, 0);
+    if (grandTotal === 0) return [];
+
+    const sectorItems = sectorTotals.map(s => ({
+      symbol:     s.name,
+      name_zh:    s.name,
+      change_pct: 0,
+      value:      s.total,
+    }));
+
+    const outerBounds: Bounds = { x: 0, y: 0, w: containerWidth, h: containerHeight };
+    const sectorRects = squarify(sectorItems, outerBounds);
+
+    return sectorRects.map((sr, idx) => {
+      const sector = sectorTotals[idx];
+      if (!sector) return null;
+
+      const stockBounds: Bounds = {
+        x: sr.x + PADDING,
+        y: sr.y + LABEL_H,
+        w: Math.max(sr.w - PADDING * 2, 0),
+        h: Math.max(sr.h - LABEL_H - PADDING, 0),
+      };
+
+      const stockItems = sector.stocks.map(st => ({
+        symbol:     st.symbol,
+        name_zh:    st.name_zh,
+        change_pct: st.change_pct ?? 0,
+        value:      getStockSize(st, sizeBy),
+      }));
+
+      const stockRects = squarify(stockItems, stockBounds);
+
+      return { sectorRect: sr, sectorName: sector.name, stockRects };
+    }).filter(Boolean) as {
+      sectorRect: LayoutRect;
+      sectorName: string;
+      stockRects: LayoutRect[];
+    }[];
+  }, [sectors, sizeBy, containerWidth, containerHeight]);
+
+  if (containerWidth <= 0 || containerHeight <= 0) return null;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <div className="mx-auto max-w-screen-xl px-4 py-6 flex flex-col gap-4">
-
-        {/* Title */}
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            台股熱力圖
-          </h1>
-          <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-            依產業分類顯示個股漲跌，點擊進入個股頁面
-          </p>
-        </div>
-
-        {/* Market summary badges */}
-        {summary && (
-          <div className="flex gap-3 text-xs">
-            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(255,77,109,0.12)', color: 'var(--accent-red)' }}>
-              ▲ 上漲 {summary.up_count}
-            </span>
-            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(0,212,170,0.12)', color: 'var(--accent-green)' }}>
-              ▼ 下跌 {summary.down_count}
-            </span>
-            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(139,143,168,0.12)', color: 'var(--text-secondary)' }}>
-              — 平盤 {summary.flat_count}
-            </span>
-          </div>
-        )}
-
-        {/* Controls */}
-        <div className="flex flex-wrap gap-4 items-center">
-          {/* Market filter */}
-          <div className="flex gap-1">
-            {MARKET_TABS.map(t => (
-              <button
-                key={t.value}
-                onClick={() => setMarket(t.value)}
-                className="rounded px-3 py-1 text-xs font-medium transition-colors"
-                style={{
-                  backgroundColor: market === t.value ? 'var(--accent-green)' : 'transparent',
-                  color: market === t.value ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                  border: `1px solid ${market === t.value ? 'var(--accent-green)' : 'var(--border)'}`,
-                }}
+    <div ref={containerRef} className="relative w-full" style={{ height: containerHeight }}>
+      <svg
+        width={containerWidth}
+        height={containerHeight}
+        style={{ display: 'block' }}
+      >
+        {sectorLayouts.map(({ sectorRect: sr, sectorName, stockRects }) => (
+          <g key={sectorName}>
+            {/* Sector background */}
+            <rect
+              x={sr.x} y={sr.y} width={sr.w} height={sr.h}
+              fill="var(--bg-secondary)"
+              stroke="var(--bg-primary)"
+              strokeWidth={2}
+            />
+            {/* Sector label */}
+            {sr.w > 40 && (
+              <text
+                x={sr.x + 6}
+                y={sr.y + 13}
+                fontSize={11}
+                fill="var(--text-muted)"
+                fontFamily="'Noto Sans TC', sans-serif"
+                style={{ userSelect: 'none', pointerEvents: 'none' }}
               >
-                {t.label}
-              </button>
-            ))}
+                {sectorName}
+              </text>
+            )}
+
+            {/* Stock rects */}
+            {stockRects.map(rect => {
+              const pct    = rect.change_pct ?? 0;
+              const fill   = changeToColor(pct);
+              const tColor = textColor(pct);
+              const showSymbol = rect.w >= 35;
+              const showPct    = rect.h >= 25;
+
+              return (
+                <g
+                  key={rect.symbol}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => { window.location.href = `/stock/${rect.symbol}`; }}
+                  onMouseMove={e => {
+                    const svgEl = (e.currentTarget as SVGGElement).closest('svg');
+                    const svgRect = svgEl?.getBoundingClientRect();
+                    setTooltip({
+                      x: e.clientX - (svgRect?.left ?? 0) + 12,
+                      y: e.clientY - (svgRect?.top  ?? 0) - 10,
+                      symbol:     rect.symbol,
+                      name_zh:    rect.name_zh,
+                      change_pct: pct,
+                    });
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
+                >
+                  <rect
+                    x={rect.x + 1}
+                    y={rect.y + 1}
+                    width={Math.max(rect.w - 2, 0)}
+                    height={Math.max(rect.h - 2, 0)}
+                    fill={fill}
+                    rx={2}
+                  />
+                  {showSymbol && (
+                    <text
+                      x={rect.x + rect.w / 2}
+                      y={rect.y + rect.h / 2 - (showPct ? 7 : 0)}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={Math.min(12, rect.w / 4)}
+                      fontWeight="600"
+                      fill={tColor}
+                      fontFamily="'IBM Plex Mono', monospace"
+                      style={{ userSelect: 'none', pointerEvents: 'none' }}
+                    >
+                      {rect.symbol}
+                    </text>
+                  )}
+                  {showPct && (
+                    <text
+                      x={rect.x + rect.w / 2}
+                      y={rect.y + rect.h / 2 + (showSymbol ? 10 : 0)}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={Math.min(11, rect.w / 5)}
+                      fill={tColor}
+                      fontFamily="'IBM Plex Mono', monospace"
+                      style={{ userSelect: 'none', pointerEvents: 'none' }}
+                    >
+                      {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        ))}
+      </svg>
+
+      {/* Tooltip */}
+      {tooltip && (
+        <div
+          className="pointer-events-none absolute z-50 rounded px-2 py-1.5 text-xs shadow-lg"
+          style={{
+            left: tooltip.x,
+            top:  tooltip.y,
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-primary)',
+            maxWidth: 160,
+          }}
+        >
+          <div className="font-semibold">{tooltip.symbol} {tooltip.name_zh}</div>
+          <div style={{ color: changeToColor(tooltip.change_pct) }}>
+            {tooltip.change_pct >= 0 ? '+' : ''}{tooltip.change_pct.toFixed(2)}%
           </div>
-
-          {/* Size by */}
-          <div className="flex gap-1">
-            {SIZE_TABS.map(t => (
-              <button
-                key={t.value}
-                onClick={() => setSizeBy(t.value as 'market_cap' | 'volume')}
-                className="rounded px-3 py-1 text-xs font-medium transition-colors"
-                style={{
-                  backgroundColor: sizeBy === t.value ? 'var(--accent-blue)' : 'transparent',
-                  color: sizeBy === t.value ? '#fff' : 'var(--text-secondary)',
-                  border: `1px solid ${sizeBy === t.value ? 'var(--accent-blue)' : 'var(--border)'}`,
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
         </div>
-
-        {/* Ad slot */}
-        <div className="flex justify-center">
-          <AdSlot size="leaderboard" slotId="heatmap-top" />
-        </div>
-
-        {/* Heatmap */}
-        <div ref={containerRef} className="w-full rounded-xl overflow-hidden"
-          style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-          {isLoading || dims.w === 0
-            ? <Skeleton className="w-full" style={{ height: 500 }} />
-            : sectors.length === 0
-              ? (
-                <div className="flex items-center justify-center h-64 text-sm"
-                  style={{ color: 'var(--text-muted)' }}>
-                  暫無資料
-                </div>
-              )
-              : (
-                <HeatMap
-                  sectors={sectors}
-                  sizeBy={sizeBy}
-                  containerWidth={dims.w}
-                  containerHeight={dims.h}
-                />
-              )
-          }
-        </div>
-
-        {/* Color legend — Taiwan convention: red=up, green=down */}
-        <div className="flex flex-wrap gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-          {[
-            { color: '#7B0000', label: '+5%以上' },
-            { color: '#FF4D6D', label: '+2%~+5%' },
-            { color: '#FF9AA2', label: '0%~+2%'  },
-            { color: '#4DFFCC', label: '-2%~0%'  },
-            { color: '#00D4AA', label: '-5%~-2%' },
-            { color: '#005F46', label: '-5%以下' },
-          ].map(({ color, label }) => (
-            <div key={label} className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
-              <span>{label}</span>
-            </div>
-          ))}
-        </div>
-
-      </div>
+      )}
     </div>
   );
 }
