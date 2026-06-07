@@ -32,7 +32,6 @@ export default function HeatmapClient() {
     { refreshInterval: 60_000 },
   );
 
-  // Measure container size
   useEffect(() => {
     function measure() {
       if (!containerRef.current) return;
@@ -64,10 +63,10 @@ export default function HeatmapClient() {
         {/* Market summary badges */}
         {summary && (
           <div className="flex gap-3 text-xs">
-            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(0,212,170,0.12)', color: 'var(--accent-green)' }}>
+            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(255,77,109,0.12)', color: 'var(--accent-red)' }}>
               ▲ 上漲 {summary.up_count}
             </span>
-            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(255,77,109,0.12)', color: 'var(--accent-red)' }}>
+            <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(0,212,170,0.12)', color: 'var(--accent-green)' }}>
               ▼ 下跌 {summary.down_count}
             </span>
             <span className="rounded px-2 py-1" style={{ backgroundColor: 'rgba(139,143,168,0.12)', color: 'var(--text-secondary)' }}>
@@ -143,15 +142,15 @@ export default function HeatmapClient() {
           }
         </div>
 
-        {/* Color legend */}
+        {/* Color legend — Taiwan convention: red=up, green=down */}
         <div className="flex flex-wrap gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
           {[
-            { color: '#005F46', label: '+5%以上' },
-            { color: '#00D4AA', label: '+2%~+5%' },
-            { color: '#4DFFCC', label: '0%~+2%'  },
-            { color: '#FF9AA2', label: '-2%~0%'  },
-            { color: '#FF4D6D', label: '-5%~-2%' },
-            { color: '#7B0000', label: '-5%以下' },
+            { color: '#7B0000', label: '+5%以上' },
+            { color: '#FF4D6D', label: '+2%~+5%' },
+            { color: '#FF9AA2', label: '0%~+2%'  },
+            { color: '#4DFFCC', label: '-2%~0%'  },
+            { color: '#00D4AA', label: '-5%~-2%' },
+            { color: '#005F46', label: '-5%以下' },
           ].map(({ color, label }) => (
             <div key={label} className="flex items-center gap-1">
               <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
