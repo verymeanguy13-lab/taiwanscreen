@@ -360,10 +360,32 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       </div>
 
       <div style={{ borderTop: `1px solid ${GRID_COLOR}` }}>
-        <div style={{ display: 'flex', padding: '4px 12px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '4px 12px 0', gap: 8 }}>
           {(['MACD', 'RSI', 'KDJ'] as SubPanel[]).map(p => (
             <button key={p} onClick={() => setSubPanel(p)} style={{ ...btnBase, border: 'none', borderBottom: subPanel === p ? '2px solid #3D8EF8' : '2px solid transparent', borderRadius: 0, background: 'transparent', color: subPanel === p ? '#fff' : '#8B8FA8', padding: '4px 12px' }}>{p}</button>
           ))}
+          <div style={{ flex: 1 }} />
+          {subPanel === 'MACD' && (
+            <div style={{ display: 'flex', gap: 12, fontSize: 10, color: TEXT_COLOR }}>
+              <span><span style={{ color: '#3D8EF8' }}>─</span> MACD</span>
+              <span><span style={{ color: '#FF4D6D' }}>─</span> Signal</span>
+              <span><span style={{ color: `${UP_COLOR}80` }}>▌</span> Hist</span>
+            </div>
+          )}
+          {subPanel === 'RSI' && (
+            <div style={{ display: 'flex', gap: 12, fontSize: 10, color: TEXT_COLOR }}>
+              <span><span style={{ color: '#9B59B6' }}>─</span> RSI(14)</span>
+              <span><span style={{ color: '#FF4D6D' }}>─ ─</span> 70</span>
+              <span><span style={{ color: '#00D4AA' }}>─ ─</span> 30</span>
+            </div>
+          )}
+          {subPanel === 'KDJ' && (
+            <div style={{ display: 'flex', gap: 12, fontSize: 10, color: TEXT_COLOR }}>
+              <span><span style={{ color: '#3D8EF8' }}>─</span> K</span>
+              <span><span style={{ color: '#FF4D6D' }}>─</span> D</span>
+              <span><span style={{ color: '#9B59B6' }}>─</span> J</span>
+            </div>
+          )}
         </div>
         <div ref={subRef} style={{ width: '100%' }} />
       </div>
