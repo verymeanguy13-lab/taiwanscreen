@@ -191,7 +191,6 @@ function PresetButton({
           }}
         >
           {desc}
-          {/* Arrow */}
           <div
             className="absolute left-1/2 top-full -translate-x-1/2"
             style={{
@@ -213,7 +212,6 @@ function PresetButton({
 export function PresetBar({ currentFilters, onFilterChange, locale = 'zh' }: PresetBarProps) {
   const [expanded, setExpanded] = useState(false);
 
-  // Detect mobile via window width — use DESKTOP_DEFAULT as SSR default
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const defaultCount = isMobile ? MOBILE_DEFAULT : DESKTOP_DEFAULT;
   const visiblePresets = expanded ? PRESETS : PRESETS.slice(0, defaultCount);
@@ -221,9 +219,12 @@ export function PresetBar({ currentFilters, onFilterChange, locale = 'zh' }: Pre
 
   const handlePreset = (preset: Preset) => {
     onFilterChange({
-      ...currentFilters,
-      ...preset.filters,
+      market: 'all',
+      sort_by: 'change_pct',
+      sort_dir: 'desc',
       page: 1,
+      per_page: 50,
+      ...preset.filters,
     });
   };
 
@@ -252,7 +253,6 @@ export function PresetBar({ currentFilters, onFilterChange, locale = 'zh' }: Pre
           />
         ))}
 
-        {/* More / Less toggle */}
         {hasMore && (
           <button
             onClick={() => setExpanded(prev => !prev)}
@@ -269,11 +269,10 @@ export function PresetBar({ currentFilters, onFilterChange, locale = 'zh' }: Pre
               (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
             }}
           >
-            {expanded ? '收起 ▲' : `更多策略 ▾`}
+            {expanded ? '收起 ▲' : '更多策略 ▾'}
           </button>
         )}
 
-        {/* Reset button */}
         <button
           onClick={handleReset}
           className="shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-150 whitespace-nowrap"
