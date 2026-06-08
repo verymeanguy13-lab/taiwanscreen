@@ -40,16 +40,14 @@ export function formatVolume(n: number): string {
 
 /**
  * Format a change value as a percentage string with its associated CSS color.
- * positive → accent-green
- * negative → accent-red
- * zero     → text-secondary
+ * Taiwan convention: positive → red, negative → green, zero → secondary
  */
 export function formatChange(n: number): { value: string; color: string } {
   if (n > 0) {
-    return { value: formatPct(n), color: 'var(--accent-green)' };
+    return { value: formatPct(n), color: 'var(--accent-red)' };
   }
   if (n < 0) {
-    return { value: formatPct(n), color: 'var(--accent-red)' };
+    return { value: formatPct(n), color: 'var(--accent-green)' };
   }
   return { value: formatPct(n), color: 'var(--text-secondary)' };
 }
