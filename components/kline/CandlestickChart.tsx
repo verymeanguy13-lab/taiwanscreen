@@ -18,7 +18,7 @@ interface KlineData {
     sma60:   (number | null)[];
     rsi14:   (number | null)[];
     macd:    { macdLine: (number | null)[]; signalLine: (number | null)[]; histogram: (number | null)[] };
-    kd:      { k: (number | null)[]; d: (number | null)[] };
+    kdj:     { k: (number | null)[]; d: (number | null)[]; j: (number | null)[] };
     bb:      { upper: (number | null)[]; lower: (number | null)[]; middle: (number | null)[] };
   };
   breakouts:  BreakoutSignal[];
@@ -113,7 +113,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!data || !containerRef.current) return;
 
-    // Destroy previous charts
     if (chartRef.current)    { (chartRef.current    as { remove: () => void }).remove(); chartRef.current    = null; }
     if (subChartRef.current) { (subChartRef.current as { remove: () => void }).remove(); subChartRef.current = null; }
 
@@ -132,7 +131,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       const candles   = getCandles();
       const closes    = candles.map(c => c.close);
 
-      // ── Main chart ────────────────────────────────────────────────────────
       const chart = createChart(container, {
         width:  container.clientWidth,
         height: 380,
@@ -155,7 +153,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       });
       chartRef.current = chart;
 
-      // ── Candlestick ───────────────────────────────────────────────────────
       const candleSeries = chart.addSeries(CandlestickSeries, {
         upColor:         UP_COLOR,
         downColor:       DOWN_COLOR,
@@ -168,7 +165,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         time: c.date as string, open: c.open, high: c.high, low: c.low, close: c.close,
       })));
 
-      // ── Volume ────────────────────────────────────────────────────────────
       const volSeries = chart.addSeries(HistogramSeries, {
         color:        `${UP_COLOR}40`,
         priceFormat:  { type: 'volume' as const },
@@ -181,7 +177,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         color: c.close >= c.open ? `${UP_COLOR}66` : `${DOWN_COLOR}66`,
       })));
 
-      // ── MA lines ──────────────────────────────────────────────────────────
       const sma5vals  = smaSeries(closes, 5);
       const sma20vals = smaSeries(closes, 20);
       const sma60vals = smaSeries(closes, 60);
@@ -206,7 +201,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       ma20s.setData(toLine(sma20vals));
       ma60s.setData(toLine(sma60vals));
 
-      // ── Bollinger ─────────────────────────────────────────────────────────
       if (data.indicators.bb && timeframe === 'D') {
         const bbU = chart.addSeries(LineSeries, { color: '#8B8FA840', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
         const bbL = chart.addSeries(LineSeries, { color: '#8B8FA840', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
@@ -216,7 +210,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         bbL.setData(data.indicators.bb.lower.map((v, i) => v != null ? { time: data.candles[i].date as string, value: v } : null).filter(Boolean) as { time: string; value: number }[]);
       }
 
-      // ── Breakout markers ──────────────────────────────────────────────────
       if (timeframe === 'D' && data.breakouts.length > 0) {
         const markerMap = {
           '上漲趨勢突破': { color: '#3D8EF8', text: '趨勢↑' },
@@ -232,7 +225,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           text:     markerMap[b.type].text,
         })));
 
-        // Box lines for 箱型
         for (const b of data.breakouts.filter(x => x.type === '箱型整理突破')) {
           for (const lvl of [b.keyLevels.boxUpper, b.keyLevels.boxLower]) {
             if (!lvl) continue;
@@ -245,7 +237,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         }
       }
 
-      // ── Crosshair ─────────────────────────────────────────────────────────
       chart.subscribeCrosshairMove((param) => {
         if (!param.time) { setCrosshairCandle(null); return; }
         const bar = param.seriesData?.get(candleSeries) as { open: number; high: number; low: number; close: number } | undefined;
@@ -256,7 +247,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         setCrossSma20(idx >= 0 ? (sma20vals[idx] ?? null) : null);
         setCrossSma60(idx >= 0 ? (sma60vals[idx] ?? null) : null);
 
-        // Badge positions
         if (timeframe === 'D') {
           setPatternPos(data.patterns.map(p => {
             const c = data.candles[p.candleIndex];
@@ -276,7 +266,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         }
       });
 
-      // ── Sub-panel ─────────────────────────────────────────────────────────
       const subEl = subRef.current;
       if (subEl && timeframe === 'D') {
         const subChart = createChart(subEl, {
@@ -309,15 +298,16 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           subChart.addSeries(LineSeries, { color: '#00D4AA60', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false }).setData([{ time: first, value: 30 }, { time: last, value: 30 }]);
         }
 
-        if (subPanel === 'KDJ' && data.indicators.kd) {
+        if (subPanel === 'KDJ' && data.indicators.kdj) {
           const ks = subChart.addSeries(LineSeries, { color: '#3D8EF8', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
           const ds = subChart.addSeries(LineSeries, { color: '#FF4D6D', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-          ks.setData(data.candles.map((c, i) => data.indicators.kd.k[i] != null ? { time: c.date as string, value: data.indicators.kd.k[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
-          ds.setData(data.candles.map((c, i) => data.indicators.kd.d[i] != null ? { time: c.date as string, value: data.indicators.kd.d[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
+          const js = subChart.addSeries(LineSeries, { color: '#9B59B6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+          ks.setData(data.candles.map((c, i) => data.indicators.kdj.k[i] != null ? { time: c.date as string, value: data.indicators.kdj.k[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
+          ds.setData(data.candles.map((c, i) => data.indicators.kdj.d[i] != null ? { time: c.date as string, value: data.indicators.kdj.d[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
+          js.setData(data.candles.map((c, i) => data.indicators.kdj.j[i] != null ? { time: c.date as string, value: data.indicators.kdj.j[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
         }
       }
 
-      // ── Resize ────────────────────────────────────────────────────────────
       const ro = new ResizeObserver(() => {
         chart.applyOptions({ width: container.clientWidth });
         if (subEl && subChartRef.current) (subChartRef.current as { applyOptions: (o: object) => void }).applyOptions({ width: subEl.clientWidth });
@@ -350,7 +340,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         sma5={crossSma5} sma20={crossSma20} sma60={crossSma60}
       />
 
-      {/* Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', flexWrap: 'wrap' }}>
         {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
           <button key={tf} onClick={() => setTimeframe(tf)} style={activeBtn(timeframe === tf)}>{tf}</button>
@@ -362,7 +351,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         <button onClick={() => setShowBB(!showBB)}     style={activeBtn(showBB)}>BB</button>
       </div>
 
-      {/* Chart + overlays */}
       <div style={{ position: 'relative' }}>
         <div ref={containerRef} style={{ width: '100%' }} />
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
@@ -371,7 +359,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         </div>
       </div>
 
-      {/* Sub-panel */}
       <div style={{ borderTop: `1px solid ${GRID_COLOR}` }}>
         <div style={{ display: 'flex', padding: '4px 12px 0' }}>
           {(['MACD', 'RSI', 'KDJ'] as SubPanel[]).map(p => (
