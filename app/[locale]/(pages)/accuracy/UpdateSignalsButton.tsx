@@ -10,14 +10,17 @@ export default function UpdateSignalsButton() {
     setLoading(true);
     setStatus('更新中...');
     try {
-      const res = await fetch('/api/admin/update-signals', {
+      const res = await fetch('/api/public/trigger-signals', {
         method: 'POST',
       });
       const data = await res.json();
-      if (data.error) {
+      if (!data.ok) {
         setStatus(`錯誤: ${data.error}`);
+      } else if (data.skipped) {
+        setStatus(`已是最新 (${data.reason})`);
       } else {
-        setStatus(`完成 — 新訊號: ${data.results.newSignals}, 5日: ${data.results.updated5d}, 10日: ${data.results.updated10d}, 20日: ${data.results.updated20d}`);
+        const r = data.result?.results;
+        setStatus(`完成 — 新訊號: ${r?.newSignals ?? 0}, 5日: ${r?.updated5d ?? 0}, 10日: ${r?.updated10d ?? 0}, 20日: ${r?.updated20d ?? 0}`);
       }
     } catch (err) {
       setStatus(`失敗: ${err}`);
