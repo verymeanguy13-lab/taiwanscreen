@@ -63,6 +63,7 @@ function marginColor(v: number | undefined | null): string {
 export default function StockClient() {
   const { symbol } = useParams<{ symbol: string }>();
   const [activeTab, setActiveTab] = useState('fundamentals');
+
   const { data: klineData } = useSWR(
     activeTab === 'kline' ? `/api/kline/${symbol}` : null,
     (url: string) => fetch(url).then(r => r.json()),
@@ -72,6 +73,13 @@ export default function StockClient() {
   const { data: res, isLoading, error } = useSWR(
     symbol ? `/api/stock/${symbol}` : null,
     fetcher,
+  );
+
+  // Live quote — refreshes every 15 seconds
+  const { data: liveQuote } = useSWR(
+    symbol ? `/api/quote/${symbol}` : null,
+    fetcher,
+    { refreshInterval: 15_000 },
   );
 
   // ── Loading ────────────────────────────────────────────────────────────────
@@ -104,7 +112,9 @@ export default function StockClient() {
   const high52w = closes.length ? Math.max(...closes) : null;
   const low52w  = closes.length ? Math.min(...closes) : null;
 
-  const change = formatChange(quote?.change_pct ?? 0);
+  // Use live quote if available, fall back to daily_prices
+  const displayQuote = liveQuote?.close ? liveQuote : quote;
+  const change = formatChange(displayQuote?.change_pct ?? 0);
   const fund   = fundamentals[0];
 
   const TABS = [
@@ -143,22 +153,27 @@ export default function StockClient() {
             {/* Row 2: price + change */}
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="num text-2xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                NT${fmt(quote?.close)}
+                NT${fmt(displayQuote?.close)}
               </span>
-              {quote?.change_amt != null && (
+              {displayQuote?.change_amt != null && (
                 <span className="num text-lg font-semibold" style={{ color: change.color }}>
-                  {(quote.change_amt ?? 0) >= 0 ? '+' : ''}{fmt(quote.change_amt)}&nbsp;
+                  {(displayQuote.change_amt ?? 0) >= 0 ? '+' : ''}{fmt(displayQuote.change_amt)}&nbsp;
                   ({change.value})
-                  {(quote.change_pct ?? 0) > 0 ? '▲' : (quote.change_pct ?? 0) < 0 ? '▼' : ''}
+                  {(displayQuote.change_pct ?? 0) > 0 ? '▲' : (displayQuote.change_pct ?? 0) < 0 ? '▼' : ''}
+                </span>
+              )}
+              {liveQuote?.time && (
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  即時 {liveQuote.time}
                 </span>
               )}
             </div>
 
             {/* Row 3: stats */}
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <span>成交量：<span className="num">{quote?.volume?.toLocaleString('en-US') ?? '—'}</span> 張</span>
-              <span>52週高：<span className="num" style={{ color: 'var(--accent-green)' }}>{high52w ? fmt(high52w) : '—'}</span></span>
-              <span>52週低：<span className="num" style={{ color: 'var(--accent-red)' }}>{low52w ? fmt(low52w) : '—'}</span></span>
+              <span>成交量：<span className="num">{displayQuote?.volume?.toLocaleString('en-US') ?? '—'}</span> 張</span>
+              <span>52週高：<span className="num" style={{ color: 'var(--accent-red)' }}>{high52w ? fmt(high52w) : '—'}</span></span>
+              <span>52週低：<span className="num" style={{ color: 'var(--accent-green)' }}>{low52w ? fmt(low52w) : '—'}</span></span>
               <span>市值：<span className="num">{fund?.market_cap ? formatNTD(fund.market_cap) : '—'}</span></span>
             </div>
 
