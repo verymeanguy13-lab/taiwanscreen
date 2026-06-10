@@ -1,7 +1,7 @@
 /**
  * app/api/admin/seed-now/route.ts
  *
- * Trigger institutional + margin backfill from the browser or curl.
+ * Trigger institutional + margin + prices backfill from the browser or curl.
  * Protected by CRON_SECRET header.
  *
  * Usage:
@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
+import { ingestDailyPrices } from "@/lib/ingest";
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -204,15 +205,16 @@ export async function POST(req: NextRequest) {
   const days = Math.min(Math.max(parseInt(body.days) || 5, 1), 60);
   const businessDays = pastBusinessDays(days);
 
-  const results: Record<string, { institutional: number; margin: number }> = {};
+  const results: Record<string, { institutional: number; margin: number; prices: number }> = {};
 
   for (const day of businessDays) {
     const isoDate = toISO(day);
-    const [inst, marg] = await Promise.all([
+    const [inst, marg, prices] = await Promise.all([
       ingestInstitutional(day),
       ingestMargin(day),
+      ingestDailyPrices(isoDate).catch(() => ({ count: 0, errors: [] })),
     ]);
-    results[isoDate] = { institutional: inst, margin: marg };
+    results[isoDate] = { institutional: inst, margin: marg, prices: prices.count };
     // polite delay
     await new Promise((r) => setTimeout(r, 800));
   }
@@ -235,11 +237,13 @@ export async function GET(req: NextRequest) {
   const [margCount] = await sql`SELECT COUNT(*) as n FROM margin_data`;
   const [latestInst] = await sql`SELECT MAX(date) as d FROM institutional_flows`;
   const [latestMarg] = await sql`SELECT MAX(date) as d FROM margin_data`;
+  const [latestPrices] = await sql`SELECT MAX(date) as d FROM daily_prices`;
 
   return NextResponse.json({
     institutional_flows_rows: instCount.n,
     margin_data_rows: margCount.n,
     latest_institutional_date: latestInst.d,
     latest_margin_date: latestMarg.d,
+    latest_prices_date: latestPrices.d,
   });
 }
