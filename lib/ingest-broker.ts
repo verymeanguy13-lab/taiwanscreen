@@ -10,7 +10,7 @@
 // Called from: app/api/admin/seed-broker/route.ts
 
 import { neon } from '@neondatabase/serverless';
-import { parseBrokerFlowText, parseBrokerCSV } from './broker-parser';
+
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -30,7 +30,7 @@ async function getTopSymbols(limit = 150): Promise<string[]> {
     ORDER BY volume DESC
     LIMIT ${limit}
   `;
-  return rows.map((r: { symbol: string }) => r.symbol);
+  return rows.map((r: any) => r.symbol as string);
 }
 
 // Fetch broker transaction data for one stock on one date from TWSE TWT38U
