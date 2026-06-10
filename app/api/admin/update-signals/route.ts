@@ -1,10 +1,4 @@
-// =============================================================================
-// app/api/admin/update-signals/route.ts
-// Run signal accuracy updates on demand — called from the accuracy page.
-// Processes in small batches to avoid timeout.
-// =============================================================================
-
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
 import { sma, rsi as calcRsi, macd as calcMacd, bollingerBands } from '@/lib/indicators';
 import { detectAllBreakouts } from '@/lib/breakouts';
@@ -21,12 +15,7 @@ function tradingDaysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export async function POST(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret');
-  if (secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export async function POST() {
   const allErrors: string[] = [];
   let newSignals = 0;
   let updated5d  = 0;
@@ -34,7 +23,6 @@ export async function POST(req: NextRequest) {
   let updated20d = 0;
 
   try {
-    // Step A: detect today's signals (top 100 by volume only, to stay fast)
     const allSymbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
       `SELECT s.symbol, s.sector
        FROM stocks s
@@ -108,7 +96,6 @@ export async function POST(req: NextRequest) {
       } catch { /* skip symbol */ }
     }));
 
-    // Step B: fill in outcomes
     for (const [days, col, retCol, upCol] of [
       [5,  'price_5d',  'return_5d',  'price_up_5d' ],
       [10, 'price_10d', 'return_10d', 'price_up_10d'],
