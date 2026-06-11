@@ -3,6 +3,9 @@
 // No-auth public endpoint called from the browser on the accuracy page mount.
 // Protected by a DB date-check gate — if signals were already computed today,
 // the expensive 100-stock query is skipped entirely.
+//
+// Race condition fix: inserts a sentinel signal_result row at the start of
+// the run so concurrent requests see it and skip immediately.
 
 import { NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
@@ -26,20 +29,37 @@ function tradingDaysAgo(n: number): string {
 
 export async function POST() {
   try {
-    // ── Gate: skip if signals were already computed today ─────────────────
-    const today = new Date().toISOString().split('T')[0];
-    const [latest] = await sql`SELECT MAX(signal_date) as d FROM signal_results`;
-    if (latest?.d && String(latest.d).startsWith(today)) {
-      return NextResponse.json({ ok: true, skipped: true, reason: 'already up to date' });
-    }
+    const todayDate = new Date().toISOString().split('T')[0];
 
-    // ── Also skip on weekends ─────────────────────────────────────────────
+    // ── Skip on weekends ──────────────────────────────────────────────────
     const dow = new Date().getDay();
     if (dow === 0 || dow === 6) {
       return NextResponse.json({ ok: true, skipped: true, reason: 'market closed (weekend)' });
     }
 
-    // ── Run signal computation directly (no internal HTTP call) ───────────
+    // ── Gate: skip if signals were already computed today ─────────────────
+    // Use a COUNT check rather than MAX — faster and works with sentinel row
+    const [existing] = await sql`
+      SELECT COUNT(*) as n FROM signal_results WHERE signal_date = ${todayDate}
+    `;
+    if (Number(existing?.n) > 0) {
+      return NextResponse.json({ ok: true, skipped: true, reason: 'already up to date' });
+    }
+
+    // ── Sentinel: insert one placeholder row so concurrent requests skip ──
+    // This is the race condition fix — any second request hitting the gate
+    // above will now see count > 0 and return immediately.
+    try {
+      await sql`
+        INSERT INTO signal_results (symbol, signal_type, signal_date, entry_price, confidence)
+        VALUES ('0000', '__sentinel__', ${todayDate}, 0, 0)
+        ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING
+      `;
+    } catch {
+      // If sentinel insert fails (e.g. FK constraint), fall through — not critical
+    }
+
+    // ── Run signal computation ────────────────────────────────────────────
     const allErrors: string[] = [];
     let newSignals = 0;
     let updated5d  = 0;
@@ -55,8 +75,6 @@ export async function POST() {
        LIMIT 100`,
       [],
     );
-
-    const todayDate = new Date().toISOString().slice(0, 10);
 
     await Promise.allSettled(allSymbols.map(async ({ symbol, sector }) => {
       try {
