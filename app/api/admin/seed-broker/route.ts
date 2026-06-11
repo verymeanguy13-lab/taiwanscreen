@@ -3,15 +3,23 @@
 // Trigger broker branch data ingestion for the last N business days.
 // Protected by CRON_SECRET.
 //
-// NOTE: Each stock requires a separate TWSE API call. With 150 symbols and
-// 300ms delay each, one day takes ~45s. Keep days=1 to stay under Vercel's
-// 60s function timeout. For backfill, run days=1 repeatedly.
+// Each run processes one slice of symbols (default 50) at a given offset.
+// Run multiple times with different offsets to cover more symbols:
 //
 // Usage (PowerShell):
 //   $headers = @{"x-cron-secret" = "mysecret123"; "Content-Type" = "application/json"}
-//   $body = '{"days": 1, "symbolLimit": 150}'
+//
+//   # Slice 1: top 50
+//   $body = '{"days": 1, "symbolLimit": 50, "offset": 0}'
 //   Invoke-WebRequest -Uri "https://taiwanscreen.vercel.app/api/admin/seed-broker" `
 //     -Method POST -Headers $headers -Body $body -UseBasicParsing | Select -ExpandProperty Content
+//
+//   # Slice 2: 51-100
+//   $body = '{"days": 1, "symbolLimit": 50, "offset": 50}'
+//   # Slice 3: 101-150
+//   $body = '{"days": 1, "symbolLimit": 50, "offset": 100}'
+//   # Slice 4: 151-200
+//   $body = '{"days": 1, "symbolLimit": 50, "offset": 150}'
 
 import { NextRequest, NextResponse } from 'next/server';
 import { ingestBrokerFlows } from '@/lib/ingest-broker';
@@ -34,14 +42,15 @@ export async function POST(req: NextRequest) {
   }
 
   const body        = await req.json().catch(() => ({}));
-  const days        = Math.min(Math.max(parseInt(body.days) || 1, 1), 3); // max 3 days — timeout risk
-  const symbolLimit = Math.min(parseInt(body.symbolLimit) || 150, 200);
+  const days        = Math.min(Math.max(parseInt(body.days) || 1, 1), 3);
+  const symbolLimit = Math.min(parseInt(body.symbolLimit) || 50, 100);
+  const offset      = Math.max(parseInt(body.offset) || 0, 0);
 
   const businessDays = pastBusinessDays(days);
   const results = [];
 
   for (const day of businessDays) {
-    const result = await ingestBrokerFlows(day, symbolLimit);
+    const result = await ingestBrokerFlows(day, symbolLimit, offset);
     results.push(result);
   }
 
@@ -57,13 +66,19 @@ export async function GET(req: NextRequest) {
   const { neon } = await import('@neondatabase/serverless');
   const sql = neon(process.env.DATABASE_URL!);
 
-  const [branchCount] = await sql`SELECT COUNT(*) as n FROM broker_branches`;
-  const [flowCount]   = await sql`SELECT COUNT(*) as n FROM broker_flows`;
-  const [latestFlow]  = await sql`SELECT MAX(date) as d FROM broker_flows`;
+  const [branchCount]  = await sql`SELECT COUNT(*) as n FROM broker_branches`;
+  const [flowCount]    = await sql`SELECT COUNT(*) as n FROM broker_flows`;
+  const [latestFlow]   = await sql`SELECT MAX(date) as d FROM broker_flows`;
+  const [symbolsToday] = await sql`
+    SELECT COUNT(DISTINCT symbol) as n
+    FROM broker_flows
+    WHERE date = (SELECT MAX(date) FROM broker_flows)
+  `;
 
   return NextResponse.json({
-    broker_branches_rows: branchCount.n,
-    broker_flows_rows:    flowCount.n,
-    latest_broker_date:   latestFlow.d,
+    broker_branches_rows:  branchCount.n,
+    broker_flows_rows:     flowCount.n,
+    latest_broker_date:    latestFlow.d,
+    symbols_latest_date:   symbolsToday.n,
   });
 }

@@ -11,13 +11,13 @@ function toTWSEDate(d: Date): string {
   return `${y}${m}${day}`;
 }
 
-async function getTopSymbols(limit = 150): Promise<string[]> {
+async function getTopSymbols(limit = 50, offset = 0): Promise<string[]> {
   const rows = await sql`
     SELECT symbol
     FROM daily_prices
     WHERE date = (SELECT MAX(date) FROM daily_prices)
     ORDER BY volume DESC
-    LIMIT ${limit}
+    LIMIT ${limit} OFFSET ${offset}
   `;
   return rows.map((r: any) => r.symbol as string);
 }
@@ -70,20 +70,22 @@ export interface BrokerIngestResult {
   date:             string;
   symbolsProcessed: number;
   rowsInserted:     number;
+  offset:           number;
   errors:           string[];
 }
 
 export async function ingestBrokerFlows(
   date: Date,
-  symbolLimit = 150,
+  symbolLimit = 50,
+  offset = 0,
 ): Promise<BrokerIngestResult> {
   const isoDate  = date.toISOString().split('T')[0];
   const twseDate = toTWSEDate(date);
   const errors: string[] = [];
 
-  const symbols = await getTopSymbols(symbolLimit);
+  const symbols = await getTopSymbols(symbolLimit, offset);
   if (symbols.length === 0) {
-    return { date: isoDate, symbolsProcessed: 0, rowsInserted: 0, errors: ['No symbols found'] };
+    return { date: isoDate, symbolsProcessed: 0, rowsInserted: 0, offset, errors: ['No symbols found'] };
   }
 
   // ── Phase 1: fetch all data first ────────────────────────────────────────
@@ -100,7 +102,7 @@ export async function ingestBrokerFlows(
   }
 
   if (allRows.length === 0) {
-    return { date: isoDate, symbolsProcessed: 0, rowsInserted: 0, errors: ['No data returned from TWSE'] };
+    return { date: isoDate, symbolsProcessed: 0, rowsInserted: 0, offset, errors: ['No data returned from TWSE'] };
   }
 
   // ── Phase 2: upsert ALL broker_branches first (no FK violation possible) ─
@@ -139,5 +141,5 @@ export async function ingestBrokerFlows(
     }
   }
 
-  return { date: isoDate, symbolsProcessed, rowsInserted, errors };
+  return { date: isoDate, symbolsProcessed, rowsInserted, offset, errors };
 }
