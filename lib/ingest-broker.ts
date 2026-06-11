@@ -98,7 +98,7 @@ export async function ingestBrokerFlows(
       allRows.push(...rows);
       symbolsProcessed++;
     }
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 500));
   }
 
   if (allRows.length === 0) {
