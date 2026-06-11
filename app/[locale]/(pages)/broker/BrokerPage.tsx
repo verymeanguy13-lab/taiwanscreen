@@ -13,10 +13,10 @@ import { formatChange } from '@/lib/utils';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface BrokerRow {
-  broker_id:   string;
-  broker_name: string;
-  city:        string | null;
+interface InstitutionalRow {
+  broker_id:   string; // actually symbol
+  broker_name: string; // actually name_zh
+  city:        string | null; // actually sector
   total_buy:   number | null;
   total_sell:  number | null;
   total_net:   number | null;
@@ -33,26 +33,27 @@ interface ConcentrationRow {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fmtVol(v: number | null | undefined): string {
+function fmtNet(v: number | null | undefined): string {
   if (v == null) return '—';
   const abs = Math.abs(v).toLocaleString('en-US');
   return v >= 0 ? `+${abs}` : `-${abs}`;
 }
 
-// ── Simple broker table ───────────────────────────────────────────────────────
-function BrokerTable({
+// ── Institutional flow table ──────────────────────────────────────────────────
+function InstTable({
   rows,
   valueKey,
   valueLabel,
   color,
   isLoading,
 }: {
-  rows: BrokerRow[];
+  rows: InstitutionalRow[];
   valueKey: 'total_buy' | 'total_sell' | 'total_net';
   valueLabel: string;
   color: string;
   isLoading: boolean;
 }) {
+  const router = useRouter();
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   return (
     <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
@@ -60,7 +61,7 @@ function BrokerTable({
         <thead>
           <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
             <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted)' }}>#</th>
-            <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted)' }}>券商名稱</th>
+            <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted)' }}>代號／股名</th>
             <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-muted)' }}>{valueLabel}</th>
           </tr>
         </thead>
@@ -72,23 +73,28 @@ function BrokerTable({
           )}
           {rows.map((row, idx) => (
             <tr
-              key={row.broker_id ?? row.broker_name}
+              key={row.broker_id}
+              className="cursor-pointer transition-colors duration-100"
+              onClick={() => router.push(`/stock/${row.broker_id}`)}
               style={{
                 backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-secondary)',
                 borderBottom: '1px solid var(--border)',
               }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(0,212,170,0.04)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-secondary)'; }}
             >
               <td className="num px-3 py-2" style={{ color: idx < 3 ? 'var(--accent-gold)' : 'var(--text-muted)' }}>
                 {idx + 1}
               </td>
-              <td className="px-3 py-2" style={{ color: 'var(--text-primary)' }}>
-                {row.broker_name}
+              <td className="px-3 py-2">
+                <span className="num font-semibold" style={{ color: 'var(--accent-blue)' }}>{row.broker_id}</span>
+                <span className="ml-1.5" style={{ color: 'var(--text-primary)' }}>{row.broker_name}</span>
                 {row.city && (
                   <span className="ml-1" style={{ color: 'var(--text-muted)' }}>({row.city})</span>
                 )}
               </td>
               <td className="num px-3 py-2 text-right font-semibold" style={{ color }}>
-                {fmtVol(row[valueKey])} 張
+                {fmtNet(row[valueKey])} 張
               </td>
             </tr>
           ))}
@@ -100,29 +106,23 @@ function BrokerTable({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 const TABS = [
-  { label: '今日分點',   value: 'today'         },
-  { label: '主力集中度', value: 'concentration'  },
+  { label: '今日法人動向', value: 'today'         },
+  { label: '外資投信同買', value: 'concentration'  },
 ];
 
 export default function BrokerPage() {
   const [activeTab, setActiveTab] = useState('today');
   const router = useRouter();
 
-  // Fire-and-forget ingestion on mount via the public trigger route.
-  // No secret exposed — the route is DB-gated so TWSE is only called
-  // once per day regardless of how many visitors hit the page.
-  useEffect(() => {
-    fetch('/api/public/trigger-broker', {
-      method: 'POST',
-    }).catch(() => {}); // intentionally not awaited
-  }, []);
+  // Remove broker ingestion trigger — broker_flows data is no longer used here.
+  // Real broker branch scraping (bsr.twse.com.tw) will be added in a future session.
 
   const { data: buyersRes,  isLoading: buyersLoading  } = useSWR('/api/broker?mode=top_buyers',  fetcher);
   const { data: sellersRes, isLoading: sellersLoading } = useSWR('/api/broker?mode=top_sellers', fetcher);
   const { data: concRes,    isLoading: concLoading    } = useSWR('/api/broker?mode=concentration', fetcher);
 
-  const buyers:  BrokerRow[]        = buyersRes?.data  ?? [];
-  const sellers: BrokerRow[]        = sellersRes?.data ?? [];
+  const buyers:  InstitutionalRow[] = buyersRes?.data  ?? [];
+  const sellers: InstitutionalRow[] = sellersRes?.data ?? [];
   const conc:    ConcentrationRow[] = concRes?.data    ?? [];
 
   return (
@@ -132,10 +132,10 @@ export default function BrokerPage() {
         {/* ── Page title ─────────────────────────────────────────────────── */}
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            券商分點
+            法人籌碼
           </h1>
           <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-            追蹤特定券商分點的買賣動向，掌握主力進出訊號
+            追蹤外資、投信每日買賣動向，掌握主力進出訊號
           </p>
         </div>
 
@@ -147,37 +147,37 @@ export default function BrokerPage() {
 
           <div className="px-4 py-4">
 
-            {/* ── 今日分點 ──────────────────────────────────────────────── */}
+            {/* ── 今日法人動向 ───────────────────────────────────────────── */}
             {activeTab === 'today' && (
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <div>
-                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-green)' }}>
-                    ▲ 買超最多分點 TOP 20
+                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-red)' }}>
+                    ▲ 外資買超排行 TOP 20
                   </p>
-                  <BrokerTable
+                  <InstTable
                     rows={buyers}
                     valueKey="total_buy"
-                    valueLabel="今日買超(張)"
-                    color="var(--accent-green)"
+                    valueLabel="外資買超(張)"
+                    color="var(--accent-red)"
                     isLoading={buyersLoading}
                   />
                 </div>
                 <div>
-                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-red)' }}>
-                    ▼ 賣超最多分點 TOP 20
+                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-green)' }}>
+                    ▼ 外資賣超排行 TOP 20
                   </p>
-                  <BrokerTable
+                  <InstTable
                     rows={sellers}
-                    valueKey="total_net"
-                    valueLabel="今日賣超(張)"
-                    color="var(--accent-red)"
+                    valueKey="total_sell"
+                    valueLabel="外資賣超(張)"
+                    color="var(--accent-green)"
                     isLoading={sellersLoading}
                   />
                 </div>
               </div>
             )}
 
-            {/* ── 主力集中度 ────────────────────────────────────────────── */}
+            {/* ── 外資投信同買 ────────────────────────────────────────────── */}
             {activeTab === 'concentration' && (
               <div className="flex flex-col gap-4">
                 <div
@@ -188,7 +188,7 @@ export default function BrokerPage() {
                     color: 'var(--accent-gold)',
                   }}
                 >
-                  💡 特定券商買超比例超過 50%，可能代表主力佈局；超過 70% 的個股以金色標示，需特別留意。
+                  💡 外資與投信同時買超，代表兩大法人同步看好；合計買超量越大，籌碼集中度越高，值得重點追蹤。
                 </div>
 
                 {concLoading
@@ -198,7 +198,7 @@ export default function BrokerPage() {
                       <table className="w-full text-xs" style={{ minWidth: 560 }}>
                         <thead>
                           <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
-                            {['代號', '股名', '主力券商', '集中度%', '買超量(張)', '股價', '漲跌%'].map(h => (
+                            {['代號', '股名', '訊號', '合計買超(張)', '股價', '漲跌%'].map(h => (
                               <th key={h} className="px-3 py-2 text-left font-semibold"
                                 style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                                 {h}
@@ -209,26 +209,23 @@ export default function BrokerPage() {
                         <tbody>
                           {conc.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="px-3 py-6 text-center"
+                              <td colSpan={6} className="px-3 py-6 text-center"
                                 style={{ color: 'var(--text-muted)' }}>
-                                今日暫無高集中度個股
+                                今日暫無外資投信同買個股
                               </td>
                             </tr>
                           )}
                           {conc.map((row, idx) => {
-                            const isHighConc = row.concentration_pct >= 70;
-                            const change     = formatChange(row.change_pct ?? 0);
+                            const change = formatChange(row.change_pct ?? 0);
                             return (
                               <tr
-                                key={`${row.symbol}-${row.broker_name}`}
+                                key={row.symbol}
                                 className="cursor-pointer transition-colors duration-100"
                                 onClick={() => router.push(`/stock/${row.symbol}`)}
                                 style={{
                                   backgroundColor: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-secondary)',
                                   borderBottom: '1px solid var(--border)',
-                                  borderLeft: isHighConc
-                                    ? '3px solid var(--accent-gold)'
-                                    : '3px solid transparent',
+                                  borderLeft: '3px solid var(--accent-gold)',
                                 }}
                                 onMouseEnter={e => {
                                   (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(0,212,170,0.04)';
@@ -245,18 +242,10 @@ export default function BrokerPage() {
                                 <td className="px-3 py-2" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
                                   {row.name_zh}
                                 </td>
-                                <td className="px-3 py-2" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                                  {row.broker_name}
+                                <td className="px-3 py-2">
+                                  <Badge variant="gold">外資投信同買</Badge>
                                 </td>
-                                <td className="num px-3 py-2 font-semibold">
-                                  <span style={{ color: isHighConc ? 'var(--accent-gold)' : 'var(--accent-orange)' }}>
-                                    {Number(row.concentration_pct).toFixed(1)}%
-                                  </span>
-                                  {isHighConc && (
-                                    <Badge variant="gold" className="ml-1.5">高</Badge>
-                                  )}
-                                </td>
-                                <td className="num px-3 py-2" style={{ color: 'var(--accent-green)' }}>
+                                <td className="num px-3 py-2 font-semibold" style={{ color: 'var(--accent-red)' }}>
                                   +{Number(row.buy_volume).toLocaleString('en-US')}
                                 </td>
                                 <td className="num px-3 py-2" style={{ color: 'var(--text-primary)' }}>
