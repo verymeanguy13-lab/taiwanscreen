@@ -84,10 +84,12 @@ export function useIntradayScanner(enabled: boolean) {
 
     try {
       // 1. Get universe
-      const uniRes = await fetch('/api/kline/universe');
+      const uniRes  = await fetch('/api/kline/universe');
       const uniJson = await uniRes.json();
+
+      // API returns { symbols: [...] } — not { stocks: [...] }
       const universe: { symbol: string; name_zh: string; sector: string }[] =
-        uniJson.stocks ?? [];
+        uniJson.symbols ?? uniJson.stocks ?? [];
 
       if (universe.length === 0) {
         setState(s => ({ ...s, status: 'done', lastScanAt: new Date() }));
@@ -146,8 +148,8 @@ export function useIntradayScanner(enabled: boolean) {
                 side:   price >= open ? ('B' as const) : ('S' as const),
               };
 
-              const signals       = detectIntradaySignals([tick, tick], candles, []);
-              const trendStrength = computeTrendStrength(signals);
+              const signals        = detectIntradaySignals([tick, tick], candles, []);
+              const trendStrength  = computeTrendStrength(signals);
               const yesterdayTrend = classifyYesterdayTrend(candles, {
                 sma5:  indicators.sma5  ?? [],
                 sma20: indicators.sma20 ?? [],
@@ -187,8 +189,8 @@ export function useIntradayScanner(enabled: boolean) {
 
       setState(s => ({
         ...s,
-        status:    'done',
-        progress:  100,
+        status:     'done',
+        progress:   100,
         lastScanAt: new Date(),
         bull: [...bull].sort((a, b) => b.bullCount - a.bullCount),
         bear: [...bear].sort((a, b) => b.bearCount - a.bearCount),
