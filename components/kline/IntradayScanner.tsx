@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  detectIntradaySignals,
+  evaluateAfterHours,
   computeTrendStrength,
   classifyYesterdayTrend,
 } from '@/lib/bullbearSignals';
@@ -58,6 +58,45 @@ function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+// Convert evaluateAfterHours bull/bear strategies to IntradaySignalEvent[]
+function strategiesToSignals(
+  bullStrategies: string[],
+  bearStrategies: string[],
+  bullScore: number,
+  bearScore: number,
+  price: number,
+): IntradaySignalEvent[] {
+  const time = new Date().toLocaleTimeString('zh-TW', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei',
+  });
+
+  const signals: IntradaySignalEvent[] = [];
+
+  for (const s of bullStrategies) {
+    signals.push({
+      type:        s as any,
+      side:        'bull',
+      time,
+      price,
+      strength:    bullScore >= 40 ? 3 : bullScore >= 20 ? 2 : 1,
+      description: s,
+    });
+  }
+
+  for (const s of bearStrategies) {
+    signals.push({
+      type:        s as any,
+      side:        'bear',
+      time,
+      price,
+      strength:    bearScore >= 40 ? 3 : bearScore >= 20 ? 2 : 1,
+      description: s,
+    });
+  }
+
+  return signals;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -87,7 +126,6 @@ export function useIntradayScanner(enabled: boolean) {
       const uniRes  = await fetch('/api/kline/universe');
       const uniJson = await uniRes.json();
 
-      // API returns { symbols: [...] } — not { stocks: [...] }
       const universe: { symbol: string; name_zh: string; sector: string }[] =
         uniJson.symbols ?? uniJson.stocks ?? [];
 
@@ -110,7 +148,7 @@ export function useIntradayScanner(enabled: boolean) {
         await Promise.all(
           batch.map(async ({ symbol, name_zh, sector }) => {
             try {
-              // Fetch live quote via TWSE proxy
+              // Fetch live quote + kline data in parallel
               const [quoteRes, klineRes] = await Promise.all([
                 fetch(`/api/proxy/twse?symbol=${symbol}`),
                 fetch(`/api/kline/${symbol}`),
@@ -124,13 +162,11 @@ export function useIntradayScanner(enabled: boolean) {
               const candles: Candle[] = klineJson.candles ?? [];
               const indicators        = klineJson.indicators ?? {};
 
-              if (candles.length < 5) return;
+              if (candles.length < 20) return;
 
-              // Parse TWSE fields
+              // Parse live price from TWSE proxy
               const price     = parseFloat(quoteJson.z ?? quoteJson.close ?? '0');
               const prevClose = parseFloat(quoteJson.y ?? '0');
-              const open      = parseFloat(quoteJson.o ?? price.toString());
-              const volume    = parseInt(quoteJson.v ?? '0', 10);
 
               if (!price || price <= 0) return;
 
@@ -138,17 +174,26 @@ export function useIntradayScanner(enabled: boolean) {
                 ? ((price - prevClose) / prevClose) * 100
                 : 0;
 
-              // Build a single synthetic tick
-              const tick = {
-                time:   new Date().toLocaleTimeString('en-US', {
-                          hour12: false, timeZone: 'Asia/Taipei',
-                        }),
-                price,
-                volume,
-                side:   price >= open ? ('B' as const) : ('S' as const),
-              };
+              // Use evaluateAfterHours for signal detection
+              // This works on daily candles — reliable, no tick stream needed
+              const evalResult = evaluateAfterHours(candles, {
+                sma5:  indicators.sma5  ?? [],
+                sma20: indicators.sma20 ?? [],
+                sma60: indicators.sma60 ?? [],
+                bb:    indicators.bb    ?? { upper: [], middle: [], lower: [] },
+              });
 
-              const signals        = detectIntradaySignals([tick, tick], candles, []);
+              const { bullStrategies, bearStrategies, bullScore, bearScore } = evalResult;
+
+              // Skip stocks with no signals
+              if (bullStrategies.length === 0 && bearStrategies.length === 0) return;
+              // Minimum score threshold to reduce noise
+              if (bullScore < 10 && bearScore < 10) return;
+
+              const signals = strategiesToSignals(
+                bullStrategies, bearStrategies, bullScore, bearScore, price,
+              );
+
               const trendStrength  = computeTrendStrength(signals);
               const yesterdayTrend = classifyYesterdayTrend(candles, {
                 sma5:  indicators.sma5  ?? [],
@@ -157,16 +202,16 @@ export function useIntradayScanner(enabled: boolean) {
                 bb:    indicators.bb    ?? { upper: [], middle: [], lower: [] },
               });
 
-              const bullCount = signals.filter(s => s.side === 'bull').length;
-              const bearCount = signals.filter(s => s.side === 'bear').length;
+              const bullCount = bullStrategies.length;
+              const bearCount = bearStrategies.length;
 
               const result: ScanResult = {
                 symbol, name_zh, sector, price, changePercent,
                 signals, trendStrength, yesterdayTrend, bullCount, bearCount,
               };
 
-              if (bullCount > 0) bull.push(result);
-              if (bearCount > 0) bear.push(result);
+              if (bullCount > 0 && bullScore >= 10) bull.push(result);
+              if (bearCount > 0 && bearScore >= 10) bear.push(result);
             } catch {
               // Skip failed symbols silently
             }
@@ -180,8 +225,8 @@ export function useIntradayScanner(enabled: boolean) {
           ...s,
           progress,
           scannedCount,
-          bull: [...bull].sort((a, b) => b.bullCount - a.bullCount),
-          bear: [...bear].sort((a, b) => b.bearCount - a.bearCount),
+          bull: [...bull].sort((a, b) => (b.trendStrength.bullScore - a.trendStrength.bullScore)),
+          bear: [...bear].sort((a, b) => (b.trendStrength.bearScore - a.trendStrength.bearScore)),
         }));
 
         await delay(200);
@@ -192,8 +237,8 @@ export function useIntradayScanner(enabled: boolean) {
         status:     'done',
         progress:   100,
         lastScanAt: new Date(),
-        bull: [...bull].sort((a, b) => b.bullCount - a.bullCount),
-        bear: [...bear].sort((a, b) => b.bearCount - a.bearCount),
+        bull: [...bull].sort((a, b) => (b.trendStrength.bullScore - a.trendStrength.bullScore)),
+        bear: [...bear].sort((a, b) => (b.trendStrength.bearScore - a.trendStrength.bearScore)),
       }));
     } catch {
       setState(s => ({ ...s, status: 'error' }));
