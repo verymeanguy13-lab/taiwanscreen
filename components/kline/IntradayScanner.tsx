@@ -148,31 +148,38 @@ export function useIntradayScanner(enabled: boolean) {
         await Promise.all(
           batch.map(async ({ symbol, name_zh, sector }) => {
             try {
-              // Fetch live quote + kline data in parallel
-              const [quoteRes, klineRes] = await Promise.all([
-                fetch(`/api/proxy/twse?symbol=${symbol}`),
+              // Fetch kline data (required) + live quote (optional)
+              const [klineRes, quoteRes] = await Promise.all([
                 fetch(`/api/kline/${symbol}`),
+                fetch(`/api/proxy/twse?symbol=${symbol}`).catch(() => null),
               ]);
 
-              if (!quoteRes.ok || !klineRes.ok) return;
+              if (!klineRes.ok) return;
 
-              const quoteJson = await quoteRes.json();
               const klineJson = await klineRes.json();
-
               const candles: Candle[] = klineJson.candles ?? [];
               const indicators        = klineJson.indicators ?? {};
 
               if (candles.length < 20) return;
 
-              // Parse live price from TWSE proxy
-              const price     = parseFloat(quoteJson.z ?? quoteJson.close ?? '0');
-              const prevClose = parseFloat(quoteJson.y ?? '0');
-
-              if (!price || price <= 0) return;
-
-              const changePercent = prevClose > 0
-                ? ((price - prevClose) / prevClose) * 100
+              // Use live price if available, fall back to last candle close
+              const lastCandle = candles[candles.length - 1];
+              let price       = lastCandle.close;
+              let changePercent = lastCandle.close > 0 && candles.length >= 2
+                ? ((lastCandle.close - candles[candles.length - 2].close) / candles[candles.length - 2].close) * 100
                 : 0;
+
+              if (quoteRes?.ok) {
+                try {
+                  const quoteJson = await quoteRes.json();
+                  const livePrice = parseFloat(quoteJson.z ?? '0');
+                  const prevClose = parseFloat(quoteJson.y ?? '0');
+                  if (livePrice > 0) {
+                    price = livePrice;
+                    changePercent = prevClose > 0 ? ((livePrice - prevClose) / prevClose) * 100 : 0;
+                  }
+                } catch { /* use fallback */ }
+              }
 
               // Use evaluateAfterHours for signal detection
               // This works on daily candles — reliable, no tick stream needed
