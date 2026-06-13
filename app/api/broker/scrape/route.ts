@@ -151,6 +151,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    if (searchParams.get('debug') === '1') {
+    const baseUrl = 'https://bsr.twse.com.tw/bshtm/bsMenu.aspx';
+    const getRes = await fetch(baseUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(15000),
+    });
+    const html = await getRes.text();
+    return new NextResponse(html.slice(0, 5000), { headers: { 'Content-Type': 'text/plain' } });
+  }
     const rows = await scrapeBrokerData(symbol, date);
     return NextResponse.json(
       { symbol, date, rows, count: rows.length },
