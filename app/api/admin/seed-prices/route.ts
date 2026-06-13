@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-
+export const maxDuration = 60;
 const sql = neon(process.env.DATABASE_URL!);
 
 function toTWSEDate(d: Date): string {
