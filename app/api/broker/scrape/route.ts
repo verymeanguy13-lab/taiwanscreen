@@ -63,7 +63,6 @@ async function scrapeBrokerData(symbol: string, date: string): Promise<BrokerScr
   if (!viewState) throw new Error('Could not extract ViewState from bsr.twse.com.tw');
 
   // ── Step 2: POST with stock number and date ───────────────────────────────
-  // Format date as MM/DD/YYYY for the form field
   const y = date.slice(0, 4);
   const m = date.slice(4, 6);
   const d = date.slice(6, 8);
@@ -95,11 +94,8 @@ async function scrapeBrokerData(symbol: string, date: string): Promise<BrokerScr
   const postHtml = await postRes.text();
 
   // ── Step 3: Parse the HTML table ──────────────────────────────────────────
-  // The result table has rows like:
-  // <tr><td>券商代號</td><td>券商名稱</td><td>買進股數</td><td>賣出股數</td></tr>
   const results: BrokerScrapeRow[] = [];
 
-  // Find all table rows with broker data
   const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
   const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
 
@@ -115,7 +111,6 @@ async function scrapeBrokerData(symbol: string, date: string): Promise<BrokerScr
 
     if (cells.length < 4) continue;
 
-    // Broker ID is typically 4 digits
     const broker_id = cells[0].trim();
     if (!/^\d{3,4}$/.test(broker_id)) continue;
 
@@ -123,7 +118,6 @@ async function scrapeBrokerData(symbol: string, date: string): Promise<BrokerScr
     const buy_shares  = parseInt(cells[2].replace(/,/g, '')) || 0;
     const sell_shares = parseInt(cells[3].replace(/,/g, '')) || 0;
 
-    // Convert shares → lots (張 = 1000 shares)
     const buy_volume  = Math.round(buy_shares  / 1000);
     const sell_volume = Math.round(sell_shares / 1000);
 
@@ -151,15 +145,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // ── DEBUG: list all form fields on the bsr.twse.com.tw page ────────────
     if (searchParams.get('debug') === '1') {
-    const baseUrl = 'https://bsr.twse.com.tw/bshtm/bsMenu.aspx';
-    const getRes = await fetch(baseUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(15000),
-    });
-    const html = await getRes.text();
-    return new NextResponse(html.slice(0, 5000), { headers: { 'Content-Type': 'text/plain' } });
-  }
+      const baseUrl = 'https://bsr.twse.com.tw/bshtm/bsMenu.aspx';
+      const getRes = await fetch(baseUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        signal: AbortSignal.timeout(15000),
+      });
+      const html = await getRes.text();
+      const tags = html.match(/<(input|select|button|option)[^>]*>/gi) ?? [];
+      return new NextResponse(tags.join('\n'), { headers: { 'Content-Type': 'text/plain' } });
+    }
+
     const rows = await scrapeBrokerData(symbol, date);
     return NextResponse.json(
       { symbol, date, rows, count: rows.length },
