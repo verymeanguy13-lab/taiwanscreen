@@ -1,14 +1,4 @@
 // app/api/admin/seed-prices/route.ts
-//
-// Backfill daily_prices for N business days using TWSE bulk price endpoint.
-// One API call per day (all ~1800 stocks in one response) — much faster than
-// per-stock fetching.
-//
-// Usage (PowerShell):
-//   $headers = @{"x-cron-secret" = "mysecret123"; "Content-Type" = "application/json"}
-//   $body = '{"days": 30}'
-//   Invoke-WebRequest -Uri "https://taiwanscreen.vercel.app/api/admin/seed-prices" `
-//     -Method POST -Headers $headers -Body $body -UseBasicParsing | Select -ExpandProperty Content
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
@@ -26,13 +16,20 @@ function toISO(d: Date): string {
   return d.toISOString().split('T')[0];
 }
 
-function pastBusinessDays(n: number): Date[] {
+function pastBusinessDays(n: number, offset: number = 0): Date[] {
   const days: Date[] = [];
   const d = new Date();
+  let skipped = 0;
   while (days.length < n) {
     d.setDate(d.getDate() - 1);
     const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) days.push(new Date(d));
+    if (dow !== 0 && dow !== 6) {
+      if (skipped < offset) {
+        skipped++;
+        continue;
+      }
+      days.push(new Date(d));
+    }
   }
   return days.reverse();
 }
@@ -59,13 +56,9 @@ async function fetchPricesForDate(twseDate: string): Promise<{
     const json = await res.json();
     if (json.stat !== 'OK') return [];
 
-    // MI_INDEX returns multiple tables — find the one with stock prices
-    // Table index 8 or 9 contains individual stock data (9 columns: symbol, name, volume, ...)
     const tables = json.tables as Array<{ title: string; fields: string[]; data: string[][] }>;
     if (!tables) return [];
 
-    // Find the table with individual stock prices — it has 'symbol' style data
-    // The fields are: 證券代號, 證券名稱, 成交股數, 成交筆數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌(+/-), 漲跌價差, 本益比
     const priceTable = tables.find(t =>
       t.fields && t.fields.length >= 9 &&
       t.fields[0]?.includes('證券代號')
@@ -79,7 +72,7 @@ async function fetchPricesForDate(twseDate: string): Promise<{
       const symbol = row[0]?.trim();
       if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
-      const volume     = Math.round(clean(row[2]) / 1000); // shares → lots
+      const volume     = Math.round(clean(row[2]) / 1000);
       const open       = clean(row[5]);
       const high       = clean(row[6]);
       const low        = clean(row[7]);
@@ -138,7 +131,8 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const days = Math.min(Math.max(parseInt(body.days) || 5, 1), 60);
-  const businessDays = pastBusinessDays(days);
+  const startOffset = Math.min(Math.max(parseInt(body.startOffset) || 0, 0), 120);
+  const businessDays = pastBusinessDays(days, startOffset);
 
   const results: Record<string, { fetched: number; inserted: number }> = {};
 
@@ -151,13 +145,13 @@ export async function POST(req: NextRequest) {
 
     results[isoDate] = { fetched: prices.length, inserted };
 
-    // Polite delay
     await new Promise(r => setTimeout(r, 500));
   }
 
   return NextResponse.json({
     ok: true,
     daysProcessed: businessDays.length,
+    startOffset,
     results,
   });
 }
