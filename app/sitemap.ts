@@ -12,7 +12,7 @@ const STATIC_ROUTES = [
   '/screener',
   '/heatmap',
   '/institutional',
-  '/broker',
+  
   '/margin',
   '/etf',
   '/dividend',

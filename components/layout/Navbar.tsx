@@ -13,7 +13,7 @@ const NAV_LINKS = [
   { key: 'screener',     href: '/screener'     },
   { key: 'heatmap',      href: '/heatmap'      },
   { key: 'institutional',href: '/institutional' },
-  { key: 'broker',       href: '/broker'        },
+ 
   { key: 'margin',       href: '/margin'        },
   { key: 'etf',          href: '/etf'           },
   { key: 'dividend',     href: '/dividend'      },
