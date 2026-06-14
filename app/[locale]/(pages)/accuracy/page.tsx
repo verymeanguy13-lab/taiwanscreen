@@ -1,23 +1,15 @@
 // =============================================================================
 // app/[locale]/(pages)/accuracy/page.tsx
-// Server component — SSR hero stats for SEO, then client dashboard
 // =============================================================================
 
 import { AccuracyDashboard } from '@/components/kline/AccuracyDashboard';
 import { queryUnsafe }       from '@/lib/db';
+import UpdateSignalsButton   from './UpdateSignalsButton';
 
 export async function generateMetadata() {
   return {
     title: '歷史技術型態統計 — 台股雷達',
     description: '台股雷達歷史技術型態統計，公開每個型態出現後的價格走勢數據',
-    alternates: {
-      languages: {
-        en: {
-          title: 'Signal Accuracy Tracker — TaiwanScreen',
-          description: 'Taiwan Stock Radar signal accuracy tracker — transparent historical performance of every 起漲 breakout signal',
-        },
-      },
-    },
   };
 }
 
@@ -29,11 +21,11 @@ async function fetchSummarySSR() {
       avg_return:     string;
     }>(
       `SELECT
-         COUNT(*)                                       AS total_signals,
-         SUM(CASE WHEN price_up_10d THEN 1 ELSE 0 END) AS price_up_count,
-         ROUND(AVG(return_10d)::numeric, 2)            AS avg_return
+         COUNT(*)                                      AS total_signals,
+         SUM(CASE WHEN price_up_5d THEN 1 ELSE 0 END) AS price_up_count,
+         ROUND(AVG(return_5d)::numeric, 2)            AS avg_return
        FROM signal_results
-       WHERE price_up_10d IS NOT NULL`,
+       WHERE price_up_5d IS NOT NULL`,
       [],
     );
     const r     = rows[0];
@@ -56,7 +48,6 @@ export default async function AccuracyPage() {
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="mx-auto max-w-screen-xl px-4 py-8">
 
-        {/* ── Hero ───────────────────────────────────────────────────────── */}
         <div style={{
           textAlign: 'center',
           padding: '40px 20px 48px',
@@ -74,7 +65,6 @@ export default async function AccuracyPage() {
             所有歷史技術型態出現後的價格走勢統計，資料來源：TWSE
           </p>
 
-          {/* 3 big stat numbers */}
           <div style={{
             display: 'flex', justifyContent: 'center',
             gap: 48, flexWrap: 'wrap', marginBottom: 32,
@@ -83,12 +73,12 @@ export default async function AccuracyPage() {
               {
                 value: `${summary.priceUpRate}%`,
                 label: '條件後上漲比例',
-                color: summary.priceUpRate >= 50 ? 'var(--accent-green)' : 'var(--accent-red)',
+                color: summary.priceUpRate >= 50 ? 'var(--accent-red)' : 'var(--accent-green)',
               },
               {
                 value: `+${summary.avgReturn}%`,
                 label: '平均10日報酬',
-                color: summary.avgReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+                color: summary.avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
               },
               {
                 value: summary.totalSignals.toLocaleString(),
@@ -103,7 +93,7 @@ export default async function AccuracyPage() {
             ))}
           </div>
 
-          <a
+          
             href="/auth/signin"
             style={{
               display: 'inline-block', padding: '12px 28px',
@@ -115,8 +105,12 @@ export default async function AccuracyPage() {
           </a>
         </div>
 
-        {/* ── Interactive Dashboard ──────────────────────────────────────── */}
         <AccuracyDashboard />
+
+        {/* Admin: update signal accuracy */}
+        <div className="mt-8 flex justify-center">
+          <UpdateSignalsButton />
+        </div>
 
       </div>
     </div>
