@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // app/[locale]/(pages)/accuracy/page.tsx
 // =============================================================================
 
@@ -77,7 +77,7 @@ export default async function AccuracyPage() {
               },
               {
                 value: `+${summary.avgReturn}%`,
-                label: '平均10日報酬',
+                label: '平均5日報酬',
                 color: summary.avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
               },
               {
@@ -107,7 +107,6 @@ export default async function AccuracyPage() {
 
         <AccuracyDashboard />
 
-        {/* Admin: update signal accuracy */}
         <div className="mt-8 flex justify-center">
           <UpdateSignalsButton />
         </div>
