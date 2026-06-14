@@ -74,6 +74,14 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
     );
   }
 
+  // Deduplicate by date for X-axis (250 signals but only ~10 unique dates)
+  const dateData = Array.from(
+    cumulData.reduce((map, row) => {
+      map.set(row.date, row);
+      return map;
+    }, new Map<string, typeof cumulData[0]>()).values()
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
@@ -93,7 +101,7 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
           </span>
         </div>
         <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={cumulData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart data={dateData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id="cumGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor={lineColor} stopOpacity={0.3} />
@@ -101,8 +109,14 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
-            <XAxis dataKey="date" tick={AXIS_STYLE} tickLine={false} axisLine={false}
-              tickFormatter={v => v.slice(5)} interval="preserveStartEnd" />
+            <XAxis
+              dataKey="date"
+              tick={AXIS_STYLE}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={v => v.slice(5)}
+              interval={Math.max(0, Math.floor(dateData.length / 6) - 1)}
+            />
             <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false}
               tickFormatter={v => `${v}%`} width={48} />
             <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="4 4" />
