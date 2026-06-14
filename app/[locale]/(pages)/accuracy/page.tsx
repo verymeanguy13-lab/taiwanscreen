@@ -93,7 +93,7 @@ export default async function AccuracyPage() {
             ))}
           </div>
 
-          
+          <a
             href="/auth/signin"
             style={{
               display: 'inline-block', padding: '12px 28px',
