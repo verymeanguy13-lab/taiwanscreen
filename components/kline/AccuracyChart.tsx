@@ -28,17 +28,17 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
   const AXIS_STYLE = { fill: 'var(--text-muted)', fontSize: 11 };
   const GRID_COLOR = 'var(--border)';
 
-  // ── Cumulative return ─────────────────────────────────────────────────────
+  // ── Average return over time ──────────────────────────────────────────────
   const sorted = [...signals]
     .filter(s => getReturn(s, period) !== null)
     .sort((a, b) => a.signal_date.localeCompare(b.signal_date));
 
-  let cumulative = 0;
-  const cumulData = sorted.map(s => {
-    cumulative += getReturn(s, period) ?? 0;
+  let runningSum = 0;
+  const cumulData = sorted.map((s, i) => {
+    runningSum += getReturn(s, period) ?? 0;
     return {
       date:       String(s.signal_date).slice(0, 10),
-      cumulative: Math.round(cumulative * 100) / 100,
+      cumulative: Math.round((runningSum / (i + 1)) * 100) / 100,
     };
   });
 
@@ -77,11 +77,11 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-      {/* TOP — Cumulative return */}
+      {/* TOP — Average return over time */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-            累計報酬曲線
+            平均報酬走勢
           </span>
           <span style={{
             fontSize: 13, fontWeight: 700,
@@ -108,7 +108,7 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
             <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="4 4" />
             <Tooltip
               contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-              formatter={(v: unknown) => { const n = Number(v); return [`${n >= 0 ? '+' : ''}${n.toFixed(2)}%`, '累計報酬']; }}
+              formatter={(v: unknown) => { const n = Number(v); return [`${n >= 0 ? '+' : ''}${n.toFixed(2)}%`, '平均報酬']; }}
             />
             <Area type="monotone" dataKey="cumulative"
               stroke={lineColor} strokeWidth={2}
