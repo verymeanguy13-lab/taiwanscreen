@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // app/[locale]/(pages)/accuracy/page.tsx
 // =============================================================================
 
@@ -93,20 +93,13 @@ export default async function AccuracyPage() {
             ))}
           </div>
 
-          <a
-            href="/auth/signin"
-            style={{
-              display: 'inline-block', padding: '12px 28px',
-              backgroundColor: 'var(--accent-green)', color: 'var(--bg-primary)',
-              borderRadius: 8, fontWeight: 700, fontSize: 15, textDecoration: 'none',
-            }}
-          >
-            免費使用 →
-          </a>
+          
+         
         </div>
 
         <AccuracyDashboard />
 
+        {/* Admin: update signal accuracy */}
         <div className="mt-8 flex justify-center">
           <UpdateSignalsButton />
         </div>
