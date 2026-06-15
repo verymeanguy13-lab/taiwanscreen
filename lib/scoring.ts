@@ -175,34 +175,65 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // CHIPS (0–100, weight 20%)
+  // Institutional flow is primary signal — margin/short are secondary.
+  // Max from institutional: +80. Max penalty from margin/short: ±10 each.
   // ------------------------------------------------------------------
   let chipsScore = 0;
   const chipsReasons: string[] = [];
 
-  if (institutional && institutional.length >= 3) {
+  if (institutional && institutional.length >= 1) {
     const recent3 = institutional.slice(-3);
-    const foreignNet3 = recent3.reduce((s, r) => s + (r.foreign_net ?? 0), 0);
-    const trustNet3   = recent3.reduce((s, r) => s + (r.trust_net ?? 0), 0);
-    const allForeignPos = recent3.every((r) => (r.foreign_net ?? 0) > 0);
-    const allTrustPos   = recent3.every((r) => (r.trust_net ?? 0) > 0);
+    const recent1 = institutional[institutional.length - 1];
 
-    if (allForeignPos) { chipsScore += 35; chipsReasons.push(`外資連買3日(+${foreignNet3})`); }
-    if (allTrustPos)   { chipsScore += 20; chipsReasons.push(`投信連買3日(+${trustNet3})`); }
+    const foreignNet3 = recent3.reduce((s, r) => s + Number(r.foreign_net ?? 0), 0);
+    const trustNet3   = recent3.reduce((s, r) => s + Number(r.trust_net   ?? 0), 0);
+    const allForeignPos  = recent3.length >= 3 && recent3.every((r) => Number(r.foreign_net ?? 0) > 0);
+    const allTrustPos    = recent3.length >= 3 && recent3.every((r) => Number(r.trust_net   ?? 0) > 0);
+    const anyForeignPos  = recent3.some((r) => Number(r.foreign_net ?? 0) > 0);
+    const anyTrustPos    = recent3.some((r) => Number(r.trust_net   ?? 0) > 0);
+    const foreignToday   = Number(recent1?.foreign_net ?? 0);
+    const trustToday     = Number(recent1?.trust_net   ?? 0);
+
+    // Foreign institutional — primary signal (up to +50)
+    if (allForeignPos) {
+      chipsScore += 50; chipsReasons.push(`外資連買3日(+${foreignNet3})`);
+    } else if (anyForeignPos) {
+      chipsScore += 25; chipsReasons.push(`外資近期買超`);
+    } else if (foreignToday < 0) {
+      chipsScore -= 10; chipsReasons.push(`外資今日賣超`);
+    }
+
+    // Trust (investment trust) — secondary institutional (up to +30)
+    if (allTrustPos) {
+      chipsScore += 30; chipsReasons.push(`投信連買3日(+${trustNet3})`);
+    } else if (anyTrustPos) {
+      chipsScore += 15; chipsReasons.push(`投信近期買超`);
+    } else if (trustToday < 0) {
+      chipsScore -= 5; chipsReasons.push(`投信今日賣超`);
+    }
   }
 
   if (margin && margin.length >= 2) {
     const latest = margin[margin.length - 1];
     const prev   = margin[margin.length - 2];
-    const marginBal = latest.margin_balance ?? 0;
-    const marginPrev = prev.margin_balance ?? 0;
-    const shortBal  = latest.short_balance ?? 0;
-    const shortPrev = prev.short_balance ?? 0;
+    const marginBal  = Number(latest.margin_balance ?? 0);
+    const marginPrev = Number(prev.margin_balance   ?? 0);
+    const shortBal   = Number(latest.short_balance  ?? 0);
+    const shortPrev  = Number(prev.short_balance    ?? 0);
 
-    if (marginBal < marginPrev) { chipsScore += 20; chipsReasons.push('融資餘額下降(健康)'); }
-    else if (marginBal > marginPrev * 1.05) { chipsScore -= 15; chipsReasons.push('融資快速增加'); }
+    // Margin signals — capped at ±10 (cannot override institutional signal)
+    if (marginBal < marginPrev) {
+      chipsScore += 10; chipsReasons.push('融資餘額下降(健康)');
+    } else if (marginBal > marginPrev * 1.05) {
+      chipsScore -= 10; chipsReasons.push('融資快速增加');
+    }
 
-    if (shortBal > shortPrev * 1.1) { chipsScore += 25; chipsReasons.push('空單增加(軋空潛力)'); }
-    else if (shortBal < shortPrev)  { chipsScore -= 20; chipsReasons.push('空單回補(賣壓)'); }
+    // Short signals — capped at ±10
+    if (shortBal > shortPrev * 1.1) {
+      chipsScore += 10; chipsReasons.push('空單增加(軋空潛力)');
+    } else if (shortBal < shortPrev) {
+      chipsScore -= 10; chipsReasons.push('空單回補(賣壓)');
+    }
   }
 
   // ------------------------------------------------------------------
@@ -390,7 +421,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   // Chips (0–100)
   let chips = 0;
   if (input.foreign_consecutive_days !== null) {
-    if (input.foreign_consecutive_days >= 5)  { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
+    if (input.foreign_consecutive_days >= 5)   { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
     else if (input.foreign_consecutive_days >= 3) { chips += 30; }
     else if (input.foreign_consecutive_days <= -3) { warnings.push('外資連賣'); }
   }
