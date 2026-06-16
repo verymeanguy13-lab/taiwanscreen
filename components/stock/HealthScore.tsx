@@ -28,16 +28,17 @@ const GRADE_CONFIG = {
 };
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
-function ProgressBar({ label, value, max = 25 }: { label: string; value: number; max?: number }) {
-  const pct = Math.round((value / max) * 100);
-  const color = pct >= 72 ? 'var(--accent-green)' : pct >= 40 ? 'var(--accent-blue)' : 'var(--accent-red)';
+function ProgressBar({ label, value, max = 100 }: { label: string; value: number; max?: number }) {
+  const capped = Math.min(value, max);
+  const pct    = Math.round((capped / max) * 100);
+  const color  = pct >= 72 ? 'var(--accent-green)' : pct >= 40 ? 'var(--accent-blue)' : 'var(--accent-red)';
 
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-xs">
         <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
         <span className="num font-semibold" style={{ color: 'var(--text-primary)' }}>
-          {value}/{max}
+          {capped}/{max}
         </span>
       </div>
       <div className="h-1.5 w-full rounded-full" style={{ backgroundColor: 'var(--bg-secondary)' }}>
