@@ -31,6 +31,9 @@ type SubPanel  = 'MACD' | 'RSI' | 'KDJ';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
+const MAIN_HEIGHT = 380;
+const SUB_HEIGHT  = 120;
+
 function aggregateWeekly(candles: Candle[]): Candle[] {
   const weeks: Record<string, Candle> = {};
   for (const c of candles) {
@@ -85,6 +88,7 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
 
   const containerRef  = useRef<HTMLDivElement>(null);
   const subRef        = useRef<HTMLDivElement>(null);
+  const wrapperRef    = useRef<HTMLDivElement>(null);
   const chartRef      = useRef<unknown>(null);
   const subChartRef   = useRef<unknown>(null);
 
@@ -128,12 +132,17 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       } = lc;
 
       const container = containerRef.current!;
-      const candles   = getCandles();
-      const closes    = candles.map(c => c.close);
+      const subEl     = subRef.current;
+
+      // Use offsetWidth for reliable width after layout
+      const getWidth = (el: HTMLElement) => el.offsetWidth || el.getBoundingClientRect().width || 600;
+
+      const candles = getCandles();
+      const closes  = candles.map(c => c.close);
 
       const chart = createChart(container, {
-        width:  container.clientWidth,
-        height: 380,
+        width:  getWidth(container),
+        height: MAIN_HEIGHT,
         layout: {
           background:  { color: CHART_BG },
           textColor:   TEXT_COLOR,
@@ -266,11 +275,11 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         }
       });
 
-      const subEl = subRef.current;
+      // ── Sub chart ──────────────────────────────────────────────────────────
       if (subEl && timeframe === 'D') {
         const subChart = createChart(subEl, {
-          width:  subEl.clientWidth,
-          height: 120,
+          width:  getWidth(subEl),
+          height: SUB_HEIGHT,
           layout: { background: { color: CHART_BG }, textColor: TEXT_COLOR, fontSize: 10 },
           grid:   { vertLines: { color: GRID_COLOR }, horzLines: { color: GRID_COLOR } },
           crosshair: { mode: CrosshairMode.Normal },
@@ -306,13 +315,42 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           ds.setData(data.candles.map((c, i) => data.indicators.kdj.d[i] != null ? { time: c.date as string, value: data.indicators.kdj.d[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
           js.setData(data.candles.map((c, i) => data.indicators.kdj.j[i] != null ? { time: c.date as string, value: data.indicators.kdj.j[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
         }
+
+        // Sync time scales between main and sub chart
+        chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+          if (range) (subChartRef.current as { timeScale: () => { setVisibleLogicalRange: (r: unknown) => void } })?.timeScale().setVisibleLogicalRange(range);
+        });
       }
 
+      // ── ResizeObserver — keeps both charts filling their containers ────────
       const ro = new ResizeObserver(() => {
-        chart.applyOptions({ width: container.clientWidth });
-        if (subEl && subChartRef.current) (subChartRef.current as { applyOptions: (o: object) => void }).applyOptions({ width: subEl.clientWidth });
+        if (!containerRef.current) return;
+        const w = getWidth(containerRef.current);
+        if (w > 0) {
+          (chartRef.current as { applyOptions: (o: object) => void })?.applyOptions({ width: w });
+        }
+        if (subRef.current && subChartRef.current) {
+          const sw = getWidth(subRef.current);
+          if (sw > 0) {
+            (subChartRef.current as { applyOptions: (o: object) => void }).applyOptions({ width: sw });
+          }
+        }
       });
-      ro.observe(container);
+
+      if (wrapperRef.current) ro.observe(wrapperRef.current);
+
+      // Force a resize after a short delay to catch any post-render layout shifts
+      setTimeout(() => {
+        if (containerRef.current) {
+          const w = getWidth(containerRef.current);
+          if (w > 0) (chartRef.current as { applyOptions: (o: object) => void })?.applyOptions({ width: w });
+        }
+        if (subRef.current && subChartRef.current) {
+          const sw = getWidth(subRef.current);
+          if (sw > 0) (subChartRef.current as { applyOptions: (o: object) => void })?.applyOptions({ width: sw });
+        }
+      }, 100);
+
       return () => ro.disconnect();
     });
 
@@ -323,7 +361,7 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, timeframe, subPanel]);
 
-  if (isLoading) return <Skeleton style={{ height: 560, borderRadius: 8 }} />;
+  if (isLoading) return <Skeleton style={{ height: MAIN_HEIGHT + SUB_HEIGHT + 80, borderRadius: 8 }} />;
   if (error || !data) return (
     <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
       無法載入K線資料
@@ -334,7 +372,10 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
   const activeBtn = (on: boolean, color?: string): React.CSSProperties => ({ ...btnBase, background: on ? '#1E2235' : 'transparent', color: on ? (color ?? '#fff') : '#8B8FA8' });
 
   return (
-    <div style={{ background: CHART_BG, borderRadius: 8, overflow: 'hidden', border: '1px solid #1E2235' }}>
+    <div
+      ref={wrapperRef}
+      style={{ background: CHART_BG, borderRadius: 8, overflow: 'hidden', border: '1px solid #1E2235', width: '100%', boxSizing: 'border-box' }}
+    >
       <OHLCBar
         candle={crosshairCandle ?? (data.candles.length > 0 ? data.candles[data.candles.length - 1] : null)}
         sma5={crossSma5} sma20={crossSma20} sma60={crossSma60}
@@ -351,14 +392,16 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         <button onClick={() => setShowBB(!showBB)}     style={activeBtn(showBB)}>BB</button>
       </div>
 
-      <div style={{ position: 'relative' }}>
-        <div ref={containerRef} style={{ width: '100%' }} />
+      {/* Main chart */}
+      <div style={{ position: 'relative', width: '100%', height: MAIN_HEIGHT }}>
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
           {patternPos.map((p, i)  => <PatternBadge  key={i} pattern={p.pattern} x={p.x} y={p.y} />)}
           {breakoutPos.map((b, i) => <BreakoutBadge key={i} signal={b.signal}   x={b.x} y={b.y} />)}
         </div>
       </div>
 
+      {/* Sub chart */}
       <div style={{ borderTop: `1px solid ${GRID_COLOR}` }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '4px 12px 0', gap: 8 }}>
           {(['MACD', 'RSI', 'KDJ'] as SubPanel[]).map(p => (
@@ -387,7 +430,7 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
             </div>
           )}
         </div>
-        <div ref={subRef} style={{ width: '100%' }} />
+        <div ref={subRef} style={{ width: '100%', height: SUB_HEIGHT }} />
       </div>
     </div>
   );
