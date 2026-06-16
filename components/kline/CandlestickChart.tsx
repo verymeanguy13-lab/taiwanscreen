@@ -316,9 +316,23 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           js.setData(data.candles.map((c, i) => data.indicators.kdj.j[i] != null ? { time: c.date as string, value: data.indicators.kdj.j[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
         }
 
-        // Sync time scales between main and sub chart
+        // ── Sync time scales — apply immediately + subscribe to changes ──────
+        // Use requestAnimationFrame so both charts have finished their first render
+        requestAnimationFrame(() => {
+          const mainRange = chart.timeScale().getVisibleLogicalRange();
+          if (mainRange) {
+            subChart.timeScale().setVisibleLogicalRange(mainRange);
+          } else {
+            subChart.timeScale().fitContent();
+          }
+        });
+
+        // Keep sub chart in sync whenever user scrolls or zooms main chart
         chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-          if (range) (subChartRef.current as { timeScale: () => { setVisibleLogicalRange: (r: unknown) => void } })?.timeScale().setVisibleLogicalRange(range);
+          if (range && subChartRef.current) {
+            (subChartRef.current as { timeScale: () => { setVisibleLogicalRange: (r: unknown) => void } })
+              .timeScale().setVisibleLogicalRange(range);
+          }
         });
       }
 
