@@ -20,6 +20,7 @@ export async function GET(
       // ── Fetch last 4 periods of available fundamentals ───────────────────
       // pe_ratio, pb_ratio, roe, debt_ratio are all NULL in DB (not yet seeded).
       // Use gross_margin, net_margin, eps, revenue which ARE populated.
+      // Skip rows where gross_margin is NULL (e.g. current quarter not yet reported).
       const fundRows = await queryUnsafe<{
         gross_margin: number | null;
         net_margin:   number | null;
@@ -29,6 +30,7 @@ export async function GET(
         `SELECT gross_margin, net_margin, eps, revenue
          FROM fundamentals
          WHERE symbol = $1
+         AND gross_margin IS NOT NULL
          ORDER BY period DESC
          LIMIT 4`,
         [symbol],
