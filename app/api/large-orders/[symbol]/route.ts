@@ -1,0 +1,48 @@
+// =============================================================================
+// app/api/large-orders/[symbol]/route.ts
+// GET /api/large-orders/[symbol]?days=5
+// Returns large block trades + consecutive buyer analysis for a symbol.
+// Uses TWSE TWT38U (no CAPTCHA, no auth required).
+// =============================================================================
+
+import { NextRequest, NextResponse } from 'next/server';
+import { fetchLargeOrders, detectConsecutiveBuyers } from '@/lib/largeOrders';
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ symbol: string }> },
+) {
+  const { symbol } = await params;
+  const url = new URL(req.url);
+
+  const days = Math.min(
+    parseInt(url.searchParams.get('days') ?? '5', 10) || 5,
+    30,
+  );
+
+  try {
+    // Today's date for single-day large orders display
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Run both fetches in parallel
+    const [largeOrders, consecutiveBuyers] = await Promise.all([
+      fetchLargeOrders(symbol, today),
+      detectConsecutiveBuyers(symbol, days),
+    ]);
+
+    return NextResponse.json(
+      { largeOrders, consecutiveBuyers },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+    );
+  } catch (err) {
+    console.error(`[large-orders] Error for ${symbol}:`, err);
+    return NextResponse.json(
+      { largeOrders: [], consecutiveBuyers: [], error: 'Failed to fetch large orders' },
+      { status: 200 }, // graceful degradation — UI handles empty state
+    );
+  }
+}

@@ -37,7 +37,13 @@
     "yield":     "Yield",
     "roe":       "ROE",
     "marketCap": "Market Cap",
-    "sector":    "Sector"
+    "sector":    "Sector",
+    "large_orders": "Large Orders",
+    "consecutive_buyers": "Consecutive Block Trades",
+    "buy_direction": "Buy",
+    "sell_direction": "Sell",
+    "consecutive_days": "Consecutive Days",
+    "total_volume": "Total Volume (lots)"
   },
   "institutional": {
     "title":       "Institutional Flows",

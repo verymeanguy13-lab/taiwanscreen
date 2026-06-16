@@ -340,6 +340,7 @@ export interface HealthScoreInput {
   pb_ratio:                 number | null;
   roe:                      number | null;
   gross_margin:             number | null;
+  net_margin:               number | null;
   revenue_growth_yoy:       number | null;
   eps_growth_yoy:           number | null;
   debt_ratio:               number | null;
@@ -368,6 +369,8 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const warnings:  string[] = [];
 
   // Profitability (0–100)
+  // pe_ratio and roe are not yet in DB — score from gross_margin + net_margin.
+  // When those columns are populated later, add them back here.
   let profitability = 0;
   if (input.roe !== null) {
     if (input.roe >= 20)      { profitability += 40; strengths.push('ROE優異(≥20%)'); }
@@ -375,9 +378,17 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
     else if (input.roe < 5)   { warnings.push('ROE偏低'); }
   }
   if (input.gross_margin !== null) {
-    if (input.gross_margin >= 50)      { profitability += 30; strengths.push('毛利率高(≥50%)'); }
-    else if (input.gross_margin >= 30) { profitability += 18; }
-    else if (input.gross_margin < 15)  { warnings.push('毛利率偏低'); }
+    if (input.gross_margin >= 50)      { profitability += 50; strengths.push('毛利率高(≥50%)'); }
+    else if (input.gross_margin >= 30) { profitability += 35; strengths.push('毛利率良好'); }
+    else if (input.gross_margin >= 15) { profitability += 15; }
+    else                               { warnings.push('毛利率偏低'); }
+  }
+  if (input.net_margin != null) {
+    const nm = Number(input.net_margin);
+    if (nm >= 20)      { profitability += 50; strengths.push('淨利率優異(≥20%)'); }
+    else if (nm >= 10) { profitability += 30; strengths.push('淨利率良好'); }
+    else if (nm >= 5)  { profitability += 15; }
+    else if (nm < 0)   { warnings.push('淨利率為負'); }
   }
   if (input.pe_ratio !== null) {
     if (input.pe_ratio > 0 && input.pe_ratio <= 15)      { profitability += 30; strengths.push('本益比合理'); }
@@ -401,21 +412,27 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   }
 
   // Safety (0–100)
+  // debt_ratio and pb_ratio are not yet in DB — safety scoring uses dividend data only for now.
+  // When those columns are populated, the stubs below will activate automatically.
   let safety = 0;
   if (input.debt_ratio !== null) {
-    if (input.debt_ratio <= 30)      { safety += 50; strengths.push('負債比低(≤30%)'); }
-    else if (input.debt_ratio <= 50) { safety += 30; }
+    if (input.debt_ratio <= 30)      { safety += 40; strengths.push('負債比低(≤30%)'); }
+    else if (input.debt_ratio <= 50) { safety += 25; }
     else if (input.debt_ratio > 70)  { warnings.push('負債比偏高'); }
   }
   if (input.pb_ratio !== null) {
-    if (input.pb_ratio > 0 && input.pb_ratio <= 1.5) { safety += 30; strengths.push('股價淨值比低'); }
-    else if (input.pb_ratio > 0 && input.pb_ratio <= 3) { safety += 15; }
+    if (input.pb_ratio > 0 && input.pb_ratio <= 1.5) { safety += 20; strengths.push('股價淨值比低'); }
+    else if (input.pb_ratio > 0 && input.pb_ratio <= 3) { safety += 10; }
   }
-  if (input.latest_yield_pct !== null && input.latest_yield_pct >= 4) {
-    safety += 20; strengths.push(`殖利率${input.latest_yield_pct.toFixed(1)}%`);
+  if (input.latest_yield_pct !== null) {
+    if (input.latest_yield_pct >= 5)      { safety += 40; strengths.push(`高殖利率${input.latest_yield_pct.toFixed(1)}%`); }
+    else if (input.latest_yield_pct >= 3) { safety += 25; strengths.push(`殖利率${input.latest_yield_pct.toFixed(1)}%`); }
+    else if (input.latest_yield_pct > 0)  { safety += 10; }
   }
-  if (input.consecutive_years !== null && input.consecutive_years >= 5) {
-    safety += 20; strengths.push(`連續配息${input.consecutive_years}年`);
+  if (input.consecutive_years !== null) {
+    if (input.consecutive_years >= 10)    { safety += 40; strengths.push(`連續配息${input.consecutive_years}年`); }
+    else if (input.consecutive_years >= 5){ safety += 25; strengths.push(`連續配息${input.consecutive_years}年`); }
+    else if (input.consecutive_years >= 2){ safety += 10; }
   }
 
   // Chips (0–100)

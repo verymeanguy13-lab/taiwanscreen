@@ -37,7 +37,13 @@
     "yield":     "殖利率",
     "roe":       "ROE",
     "marketCap": "市值",
-    "sector":    "產業"
+    "sector":    "產業",
+    "large_orders": "大單追蹤",
+    "consecutive_buyers": "連續大單追蹤",
+    "buy_direction": "買超",
+    "sell_direction": "賣超",
+    "consecutive_days": "連續天數",
+    "total_volume": "合計張數"
   },
   "institutional": {
     "title":       "三大法人動向",

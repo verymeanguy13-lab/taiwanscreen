@@ -17,24 +17,40 @@ export async function GET(
 
   try {
     const result = await cached(cacheKey, 60 * 60, async () => {
-      // ── Fetch latest fundamentals ────────────────────────────────────────
+      // ── Fetch last 4 periods of available fundamentals ───────────────────
+      // pe_ratio, pb_ratio, roe, debt_ratio are all NULL in DB (not yet seeded).
+      // Use gross_margin, net_margin, eps, revenue which ARE populated.
       const fundRows = await queryUnsafe<{
-        pe_ratio:           number | null;
-        pb_ratio:           number | null;
-        roe:                number | null;
-        gross_margin:       number | null;
-        revenue_growth_yoy: number | null;
-        eps_growth_yoy:     number | null;
-        debt_ratio:         number | null;
+        gross_margin: number | null;
+        net_margin:   number | null;
+        eps:          number | null;
+        revenue:      number | null;
       }>(
-        `SELECT pe_ratio, pb_ratio, roe, gross_margin,
-                revenue_growth_yoy, eps_growth_yoy, debt_ratio
+        `SELECT gross_margin, net_margin, eps, revenue
          FROM fundamentals
          WHERE symbol = $1
          ORDER BY period DESC
-         LIMIT 1`,
+         LIMIT 4`,
         [symbol],
       );
+
+      // ── Compute YoY growth from period[0] vs period[1] ──────────────────
+      const latestFund = fundRows[0] ?? {};
+      const prevFund   = fundRows[1] ?? {};
+
+      const revenueGrowth =
+        latestFund.revenue && prevFund.revenue && Number(prevFund.revenue) > 0
+          ? ((Number(latestFund.revenue) - Number(prevFund.revenue)) /
+              Number(prevFund.revenue)) *
+            100
+          : null;
+
+      const epsGrowth =
+        latestFund.eps && prevFund.eps && Number(prevFund.eps) > 0
+          ? ((Number(latestFund.eps) - Number(prevFund.eps)) /
+              Number(prevFund.eps)) *
+            100
+          : null;
 
       // ── Fetch latest institutional flows ─────────────────────────────────
       const flowRows = await queryUnsafe<{
@@ -61,23 +77,28 @@ export async function GET(
         [symbol],
       );
 
-      const fund = fundRows[0] ?? {};
       const flow = flowRows[0] ?? {};
       const div  = divRows[0]  ?? {};
 
       return computeHealthScore({
-        pe_ratio:                 fund.pe_ratio                 ?? null,
-        pb_ratio:                 fund.pb_ratio                 ?? null,
-        roe:                      fund.roe                      ?? null,
-        gross_margin:             fund.gross_margin             ?? null,
-        revenue_growth_yoy:       fund.revenue_growth_yoy       ?? null,
-        eps_growth_yoy:           fund.eps_growth_yoy           ?? null,
-        debt_ratio:               fund.debt_ratio               ?? null,
-        foreign_consecutive_days: flow.foreign_consecutive_days ?? null,
-        triple_buy:               flow.triple_buy               ?? false,
-        latest_yield_pct:         div.latest_yield_pct          ?? null,
-        consecutive_years:        div.consecutive_years         ?? null,
-        stability_score:          div.stability_score           ?? null,
+        // Not yet in DB — pass null; scoring falls back to available data
+        pe_ratio:   null,
+        pb_ratio:   null,
+        roe:        null,
+        debt_ratio: null,
+
+        // Available from fundamentals table
+        gross_margin:       latestFund.gross_margin ? Number(latestFund.gross_margin) : null,
+        net_margin:         latestFund.net_margin   ? Number(latestFund.net_margin)   : null,
+        revenue_growth_yoy: revenueGrowth,
+        eps_growth_yoy:     epsGrowth,
+
+        // Institutional & dividend
+        foreign_consecutive_days: flow.foreign_consecutive_days ? Number(flow.foreign_consecutive_days) : null,
+        triple_buy:               flow.triple_buy ?? false,
+        latest_yield_pct:         div.latest_yield_pct  ? Number(div.latest_yield_pct)  : null,
+        consecutive_years:        div.consecutive_years ? Number(div.consecutive_years) : null,
+        stability_score:          div.stability_score   ? Number(div.stability_score)   : null,
       });
     });
 

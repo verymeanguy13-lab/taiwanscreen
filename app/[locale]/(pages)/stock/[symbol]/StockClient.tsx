@@ -22,6 +22,7 @@ import { CandlestickChart } from '@/components/kline/CandlestickChart';
 import { ScoreCard }        from '@/components/kline/ScoreCard';
 import { BullBearPanel }    from '@/components/kline/BullBearPanel';
 import { ScoringPanel }     from '@/components/kline/ScoringPanel';
+import LargeOrdersTab       from '@/components/stock/LargeOrdersTab';
 
 const fetcher = (url: string) =>
   fetch(url).then(r => {
@@ -125,6 +126,7 @@ export default function StockClient() {
     { label: '配息紀錄', value: 'dividends'    },
     { label: '供應鏈',   value: 'supply'       },
     { label: '大股東',   value: 'shareholders' },
+    { label: '大單追蹤', value: 'large-orders' },
   ];
 
   return (
@@ -389,6 +391,10 @@ export default function StockClient() {
 
               {activeTab === 'shareholders' && (
                 <ShareholdersTab symbol={symbol} />
+              )}
+
+              {activeTab === 'large-orders' && (
+                <LargeOrdersTab symbol={symbol} />
               )}
 
             </div>
