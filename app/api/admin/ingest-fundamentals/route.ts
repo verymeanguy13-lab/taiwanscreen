@@ -18,7 +18,8 @@ const TYPE_MAP: Record<string, string> = {
 };
 
 async function fetchFinMind(dataset: string, stockId: string, startDate: string) {
-  const url = `${FINMIND_BASE}?dataset=${dataset}&data_id=${stockId}&start_date=${startDate}&token=`;
+  const token = process.env.FINMIND_TOKEN ?? '';
+  const url = `${FINMIND_BASE}?dataset=${dataset}&data_id=${stockId}&start_date=${startDate}&token=${token}`;
   try {
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return [];
