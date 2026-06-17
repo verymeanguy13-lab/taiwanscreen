@@ -97,6 +97,15 @@ export async function GET(req: NextRequest) {
 
             if (!strategies || strategies.length === 0 || score <= 0) return null;
 
+            // Momentum gate for bull: require rising price + volume confirmation
+            if (side === 'bull') {
+              const last = candles[candles.length - 1];
+              const prev = candles[candles.length - 2];
+              const avg5vol = candles.slice(-6, -1).reduce((s, c) => s + (c.volume ?? 0), 0) / 5;
+              if (last.close <= prev.close) return null;
+              if ((last.volume ?? 0) < avg5vol * 1.2) return null;
+            }
+
             const latestCandle = candles[candles.length - 1];
             const prevCandle   = candles[candles.length - 2];
             const changePercent = prevCandle?.close
