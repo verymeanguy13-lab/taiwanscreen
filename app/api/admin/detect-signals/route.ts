@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
             '突破壓力':   15,
             '開布林':     15,
             '突破趨勢線': 8,
-            '近十日強勢股': 0,  // 22% win rate — excluded from scoring
+            
           };
           const MAX_WEIGHT = 128; // theoretical max if all strategies fire
 
@@ -117,8 +117,6 @@ export async function POST(req: NextRequest) {
           ));
 
           for (const s of afterHours.bullStrategies) {
-            // Skip 近十日強勢股 — 22% win rate is worse than random
-            if (s === '近十日強勢股') continue;
             try {
               await queryUnsafe(
                 `INSERT INTO signal_results
