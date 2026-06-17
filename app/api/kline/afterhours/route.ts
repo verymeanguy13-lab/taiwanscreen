@@ -3,7 +3,9 @@
 // GET /api/kline/afterhours?side=bull|bear
 //
 // Returns stocks filtered by bearStrategies / bullStrategies from evaluateAfterHours.
-// Scans top 300 stocks by volume (not all 1800) to stay within Vercel's 60s timeout.
+// The 空方警示 tab was broken because ScannerResultsTable was calling /api/kline/scanner
+// and filtering by changePercent < 0, which is NOT how bear signals work.
+// Bear signals come from evaluateAfterHours() → bearStrategies array.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -21,14 +23,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await cached(cacheKey, 1800, async () => {
-      // Top 300 by recent volume — avoids scanning all 1800 stocks and timing out
+      // Fetch all stocks with recent price data
       const stockRows = await queryUnsafe<{ symbol: string; name_zh: string; sector: string }>(
-        `SELECT s.symbol, s.name_zh, COALESCE(s.sector, '') AS sector
+        `SELECT DISTINCT s.symbol, s.name_zh, COALESCE(s.sector, '') AS sector
          FROM stocks s
          INNER JOIN daily_prices dp ON dp.symbol = s.symbol
-         WHERE dp.date = (SELECT MAX(date) FROM daily_prices)
-         ORDER BY dp.volume DESC
-         LIMIT 300`,
+         WHERE dp.date >= CURRENT_DATE - INTERVAL '5 days'`,
         [],
       );
 
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
         signalLabel:   string;
       }> = [];
 
-      const BATCH = 50; // was 20 — fewer rounds, same total work
+      const BATCH = 20;
       for (let i = 0; i < stockRows.length; i += BATCH) {
         const batch = stockRows.slice(i, i + BATCH);
 
@@ -79,6 +79,7 @@ export async function GET(req: NextRequest) {
 
             const closes = candles.map((c) => c.close);
 
+            // Build the IndicatorSnapshot that evaluateAfterHours requires
             const indicators = {
               sma5:  sma(closes, 5),
               sma20: sma(closes, 20),
@@ -88,14 +89,13 @@ export async function GET(req: NextRequest) {
 
             const evalResult = evaluateAfterHours(candles, indicators);
 
+            // Pick the relevant strategies based on side
             const strategies = side === 'bear'
               ? evalResult.bearStrategies
               : evalResult.bullStrategies;
             const score = side === 'bear'
               ? evalResult.bearScore
               : evalResult.bullScore;
-
-            if (!strategies || strategies.length === 0 || score <= 0) return null;
 
             if (!strategies || strategies.length === 0 || score <= 0) return null;
 
@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
               volume:        latestCandle.volume ?? 0,
               confidence:    Math.min(score, 100),
               matrixScore:   Math.min(score, 100),
-              signalLabel:   strategies[0],
+              signalLabel:   strategies[0], // primary signal name
             };
           }),
         );
@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Sort by confidence descending
       results.sort((a, b) => b.confidence - a.confidence);
 
       return {
