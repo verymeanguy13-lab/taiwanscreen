@@ -96,14 +96,36 @@ export async function POST(req: NextRequest) {
           const afterHours = evaluateAfterHours(candles as any, {
             sma5: sma5arr, sma20: sma20arr, sma60: sma60arr, bb: bbData,
           });
+          // Win-rate based weights for 起漲雷達 scoring (measured June 2026):
+          // 突破均線 83%, 剛轉多 75%, 昨日強勢股 67%, 近五日強勢股 60%
+          // 突破壓力 58%, 開布林 57%, 突破趨勢線 51%, 近十日強勢股 22%
+          const WIN_RATE_WEIGHTS: Record<string, number> = {
+            '突破均線':   30,
+            '剛轉多':     25,
+            '昨日強勢股': 20,
+            '近五日強勢股': 15,
+            '突破壓力':   15,
+            '開布林':     15,
+            '突破趨勢線': 8,
+            '近十日強勢股': 0,  // 22% win rate — excluded from scoring
+          };
+          const MAX_WEIGHT = 128; // theoretical max if all strategies fire
+
+          // Compute win-rate weighted score for this stock
+          const winRateScore = Math.min(100, Math.round(
+            (afterHours.bullStrategies.reduce((sum, s) => sum + (WIN_RATE_WEIGHTS[s] ?? 8), 0) / MAX_WEIGHT) * 100
+          ));
+
           for (const s of afterHours.bullStrategies) {
+            // Skip 近十日強勢股 — 22% win rate is worse than random
+            if (s === '近十日強勢股') continue;
             try {
               await queryUnsafe(
                 `INSERT INTO signal_results
                    (symbol, signal_type, signal_date, entry_price, confidence, industry)
                  VALUES ($1,$2,$3,$4,$5,$6)
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-                [symbol, s, todayDate, Number(today.close), Math.min(100, Math.round((afterHours.bullScore / 128) * 100)), sector],
+                [symbol, s, todayDate, Number(today.close), winRateScore, sector],
               );
               symbolSignals++; newSignals++;
             } catch { /* skip */ }
