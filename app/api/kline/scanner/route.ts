@@ -2,189 +2,138 @@
 // app/api/kline/scanner/route.ts
 // GET /api/kline/scanner?type=all|uptrend|box|vreversal&industry=xxx
 //
-// SERVER-SIDE ONLY. Reads Neon. No live tick fetching. No timeout risk.
-// Cache: s-maxage=3600 (1 hour)
+// Reads from signal_results table (populated by detect-signals cron).
+// No live recalculation — fast and consistent with what was detected.
+// Cache: s-maxage=300 (5 minutes)
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
-import { cached } from '@/lib/cache';
-import type { Candle } from '@/types';
-
-import { sma, rsi as calcRsi, macd as calcMacd, volumeRatio } from '@/lib/indicators';
-import { detectAllBreakouts }   from '@/lib/breakouts';
-import { evaluateSignalMatrix } from '@/lib/signals';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface ScanResult {
-  symbol:      string;
-  name_zh:     string;
-  sector:      string;
-  breakoutType?: string;
-  confidence:  number;
-  matrixScore: number;
-  price:       number;
-  changePercent: number;
-}
-
-// ---------------------------------------------------------------------------
-// GET handler
-// ---------------------------------------------------------------------------
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const type     = (searchParams.get('type') ?? 'all') as 'all' | 'uptrend' | 'box' | 'vreversal';
   const industry = searchParams.get('industry') ?? '';
 
-  const cacheKey = `scanner:${type}:${industry}`;
-
   try {
-    const result = await cached(cacheKey, 3600, async () => {
-      // ── 1. Fetch all symbols with recent data ─────────────────────────────
-      const stockRows = await queryUnsafe<{ symbol: string; name_zh: string; sector: string }>(
-        `SELECT DISTINCT s.symbol, s.name_zh, COALESCE(s.sector, '') AS sector
-         FROM stocks s
-         INNER JOIN daily_prices dp ON dp.symbol = s.symbol
-         WHERE dp.date >= CURRENT_DATE - INTERVAL '5 days'`,
-        [],
-      );
+    // ── Get latest signal date ──────────────────────────────────────────────
+    const dateRows = await queryUnsafe<{ max: string }>(
+      `SELECT MAX(signal_date)::text AS max FROM signal_results`,
+      [],
+    );
+    const latestDate = String(dateRows[0]?.max ?? '').slice(0, 10);
 
-      // Optionally filter by industry
-      const filtered = industry
-        ? stockRows.filter((r) => r.sector === industry)
-        : stockRows;
+    if (!latestDate) {
+      return NextResponse.json({ results: [], totalScanned: 0, signalCounts: {} });
+    }
 
-      const totalScanned = filtered.length;
-      const results: ScanResult[] = [];
-      const signalCounts = { uptrend: 0, box: 0, vreversal: 0 };
+    // ── Fetch today's signals joined with stock info and latest price ───────
+    const rows = await queryUnsafe<{
+      symbol:       string;
+      name_zh:      string;
+      sector:       string;
+      signal_type:  string;
+      entry_price:  number;
+      confidence:   number;
+      close:        number;
+      prev_close:   number;
+      volume:       number;
+    }>(
+      `SELECT
+         sr.symbol,
+         s.name_zh,
+         COALESCE(s.sector, '') AS sector,
+         sr.signal_type,
+         sr.entry_price,
+         sr.confidence,
+         dp.close,
+         dp_prev.close AS prev_close,
+         dp.volume
+       FROM signal_results sr
+       JOIN stocks s ON s.symbol = sr.symbol
+       LEFT JOIN daily_prices dp
+         ON dp.symbol = sr.symbol
+         AND dp.date = $1
+       LEFT JOIN daily_prices dp_prev
+         ON dp_prev.symbol = sr.symbol
+         AND dp_prev.date = (
+           SELECT MAX(date) FROM daily_prices
+           WHERE symbol = sr.symbol AND date < $1
+         )
+       WHERE sr.signal_date = $1
+       ORDER BY sr.confidence DESC`,
+      [latestDate],
+    );
 
-      // ── 2. Process in batches of 20 ───────────────────────────────────────
-      const BATCH = 20;
-      for (let i = 0; i < filtered.length; i += BATCH) {
-        const batch = filtered.slice(i, i + BATCH);
+    // ── Get total stocks scanned (stocks with price data that day) ──────────
+    const totalRows = await queryUnsafe<{ count: number }>(
+      `SELECT COUNT(DISTINCT symbol)::int AS count
+       FROM daily_prices WHERE date = $1`,
+      [latestDate],
+    );
+    const totalScanned = totalRows[0]?.count ?? 0;
 
-        const settled = await Promise.allSettled(
-          batch.map(async ({ symbol, name_zh, sector }) => {
-            // Fetch 60 days of prices
-            const priceRows = await queryUnsafe<{
-              date:   string;
-              open:   number;
-              high:   number;
-              low:    number;
-              close:  number;
-              volume: number;
-            }>(
-              `SELECT date, open, high, low, close, volume
-               FROM daily_prices
-               WHERE symbol = $1
-                 AND date >= CURRENT_DATE - INTERVAL '60 days'
-               ORDER BY date ASC`,
-              [symbol],
-            );
+    // ── Map signal_type to breakoutType for UI compatibility ────────────────
+    const SIGNAL_TO_BREAKOUT: Record<string, string> = {
+      '上漲趨勢突破': '上漲趨勢突破',
+      '箱型整理突破': '箱型整理突破',
+      '下跌V轉突破':  '下跌V轉突破',
+      '突破趨勢線':   '上漲趨勢突破',
+      '開布林':       '箱型整理突破',
+      '剛轉多':       '下跌V轉突破',
+      '昨日強勢股':   '上漲趨勢突破',
+      '近五日強勢股': '上漲趨勢突破',
+    };
 
-            if (priceRows.length < 20) return null;
-
-            const candles: Candle[] = priceRows.map((r) => ({
-              open:   Number(r.open),
-              high:   Number(r.high),
-              low:    Number(r.low),
-              close:  Number(r.close),
-              volume: Number(r.volume),
-              date:   r.date,
-            }));
-
-            const closes  = candles.map((c) => c.close);
-            const volumes = candles.map((c) => c.volume ?? 0);
-
-            const sma5  = sma(closes, 5);
-            const sma20 = sma(closes, 20);
-            const sma60 = sma(closes, 60);
-            const rsi14 = calcRsi(closes, 14);
-            const macdData = calcMacd(closes);
-            const volRatioData = volumeRatio(volumes, 5);
-
-            const breakouts = detectAllBreakouts(candles, {
-              sma5, sma20, sma60, rsi14, macd: macdData,
-            });
-
-            // Minimal indicator snapshot for signal matrix
-            const { bollingerBands, obv: calcObv } = await import('@/lib/indicators');
-            const bbData  = bollingerBands(closes);
-            const obvData = calcObv(candles);
-            const { kdj } = await import('@/lib/indicators');
-            const kdjData = kdj(
-              candles.map((c) => c.high),
-              candles.map((c) => c.low),
-              closes,
-            );
-
-            const matrix = evaluateSignalMatrix(candles, {
-              sma5, sma20, sma60, rsi14,
-              macd: macdData,
-              kd:   { k: kdjData.k, d: kdjData.d },
-              bb:   bbData,
-              obv:  obvData,
-              volRatio: volRatioData,
-            });
-
-            // ── Keep: breakout fired OR matrixScore > 55 ──────────────────
-            const topBreakout = breakouts[0] ?? null;
-            if (!topBreakout && matrix.matrixScore <= 55) return null;
-
-            const lastCandle = candles[candles.length - 1];
-            const prevCandle = candles[candles.length - 2];
-            const changePercent = prevCandle?.close > 0
-              ? ((lastCandle.close - prevCandle.close) / prevCandle.close) * 100
-              : 0;
-
-            return {
-              symbol,
-              name_zh,
-              sector,
-              breakoutType: topBreakout?.type,
-              confidence:   topBreakout?.confidence ?? matrix.matrixScore,
-              matrixScore:  matrix.matrixScore,
-              price:        lastCandle.close,
-              changePercent: Math.round(changePercent * 100) / 100,
-            } satisfies ScanResult;
-          }),
-        );
-
-        for (const s of settled) {
-          if (s.status === 'fulfilled' && s.value !== null) {
-            const item = s.value;
-            results.push(item);
-            if (item.breakoutType === '上漲趨勢突破') signalCounts.uptrend++;
-            if (item.breakoutType === '箱型整理突破') signalCounts.box++;
-            if (item.breakoutType === '下跌V轉突破')  signalCounts.vreversal++;
-          }
-        }
+    // Deduplicate — keep highest confidence signal per symbol
+    const symbolMap = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      const existing = symbolMap.get(row.symbol);
+      if (!existing || row.confidence > existing.confidence) {
+        symbolMap.set(row.symbol, row);
       }
+    }
 
-      // ── 3. Filter by type ─────────────────────────────────────────────────
-      const typeFiltered = type === 'all'
-        ? results
-        : results.filter((r) => {
-            if (type === 'uptrend')   return r.breakoutType === '上漲趨勢突破';
-            if (type === 'box')       return r.breakoutType === '箱型整理突破';
-            if (type === 'vreversal') return r.breakoutType === '下跌V轉突破';
-            return true;
-          });
+    // Apply industry filter
+    let filtered = Array.from(symbolMap.values());
+    if (industry) {
+      filtered = filtered.filter(r => r.sector === industry);
+    }
 
-      // ── 4. Sort by confidence desc, return top 100 ───────────────────────
-      const top100 = typeFiltered
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, 100);
+    // Build results
+    const results = filtered.map(r => {
+      const close     = Number(r.close)     || Number(r.entry_price) || 0;
+      const prevClose = Number(r.prev_close) || 0;
+      const changePercent = prevClose > 0
+        ? Math.round(((close - prevClose) / prevClose) * 10000) / 100
+        : 0;
 
-      return { results: top100, totalScanned, signalCounts };
+      return {
+        symbol:       r.symbol,
+        name_zh:      r.name_zh,
+        sector:       r.sector,
+        breakoutType: SIGNAL_TO_BREAKOUT[r.signal_type] ?? '上漲趨勢突破',
+        signalLabel:  r.signal_type,
+        confidence:   Number(r.confidence) || 50,
+        matrixScore:  Number(r.confidence) || 50,
+        price:        close,
+        changePercent,
+        volume:       Number(r.volume) || 0,
+      };
     });
 
-    return NextResponse.json(result, {
-      headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=300' },
-    });
+    // Sort by confidence desc
+    results.sort((a, b) => b.confidence - a.confidence);
+
+    const signalCounts = {
+      uptrend:   results.filter(r => r.breakoutType === '上漲趨勢突破').length,
+      box:       results.filter(r => r.breakoutType === '箱型整理突破').length,
+      vreversal: results.filter(r => r.breakoutType === '下跌V轉突破').length,
+    };
+
+    return NextResponse.json(
+      { results, totalScanned, signalCounts, date: latestDate },
+      { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } },
+    );
 
   } catch (err) {
     console.error('[kline/scanner] Unexpected error:', err);
