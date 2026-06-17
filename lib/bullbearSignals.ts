@@ -68,7 +68,6 @@ export type YesterdayTrend =
 export type AfterHoursBullStrategy =
   | '昨日強勢股'
   | '近五日強勢股'
-  | '近十日強勢股'
   | '開布林'
   | '突破均線'
   | '突破壓力'
@@ -446,32 +445,35 @@ export function evaluateAfterHours(
 
   // ── Bull strategies ──────────────────────────────────────────────────────
 
-  if (trend === '昨日強勢股')  addBull('昨日強勢股',  12);
-  if (trend === '近五日強勢股') addBull('近五日強勢股', 12);
-  if (trend === '近十日強勢股') addBull('近十日強勢股', 12);
+  // Weights based on measured win rates (June 2026 data):
+  // 突破均線 83%, 剛轉多 75%, 昨日強勢股 67%, 近五日強勢股 60%
+  // 突破壓力 58%, 開布林 57%, 突破趨勢線 51%, 近十日強勢股 22% (removed)
+  if (trend === '昨日強勢股')  addBull('昨日強勢股',  20);
+  if (trend === '近五日強勢股') addBull('近五日強勢股', 15);
+  // 近十日強勢股 removed — 22% win rate, worse than random
 
   // 開布林: close above upper BB
   if (bbUpper !== null && last.close > bbUpper)
-    addBull('開布林', 20);
+    addBull('開布林', 15);
 
-  // 突破均線: crossed above ma20 today
+  // 突破均線: crossed above ma20 today — 83% win rate, highest conviction
   if (ma20Now !== null && ma20Prev !== null && last.close > ma20Now && candles[n - 2].close <= ma20Prev)
-    addBull('突破均線', 12);
+    addBull('突破均線', 30);
 
   // 突破壓力: today close > 20-day high (excluding today)
   const prior20High = Math.max(...candles.slice(Math.max(0, n - 21), n - 1).map((c) => c.high));
   if (last.close > prior20High)
-    addBull('突破壓力', 20);
+    addBull('突破壓力', 15);
 
-  // 剛轉多: ma5 crossed above ma20 in last 2 days
+  // 剛轉多: ma5 crossed above ma20 in last 2 days — 75% win rate
   if (
     ma5Now !== null && ma20Now !== null && ma5Prev !== null && ma20Prev !== null &&
     ma5Now > ma20Now && ma5Prev <= ma20Prev
-  ) addBull('剛轉多', 18);
+  ) addBull('剛轉多', 25);
 
-  // 突破趨勢線
+  // 突破趨勢線 — 51% win rate, bonus points only
   if (aboveTrendLine)
-    addBull('突破趨勢線', 12);
+    addBull('突破趨勢線', 8);
 
   // ── Bear strategies ──────────────────────────────────────────────────────
 

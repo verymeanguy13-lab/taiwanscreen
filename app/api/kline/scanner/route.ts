@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
            WHERE symbol = sr.symbol AND date < $1
          )
        WHERE sr.signal_date = $1
-       AND sr.confidence >= 50
+       AND sr.confidence >= 60
        ORDER BY sr.confidence DESC`,
       [latestDate],
     );
