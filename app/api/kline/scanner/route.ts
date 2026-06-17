@@ -61,16 +61,6 @@ export async function GET(req: NextRequest) {
          )
        WHERE sr.signal_date = $1
        AND sr.confidence >= 50
-       AND EXISTS (
-         SELECT 1 FROM fundamentals f
-         WHERE f.symbol = sr.symbol
-         AND f.gross_margin IS NOT NULL
-         AND f.net_margin IS NOT NULL
-         AND f.gross_margin > 15
-         AND f.net_margin > 0
-         ORDER BY f.period DESC
-         LIMIT 1
-       )
        ORDER BY sr.confidence DESC`,
       [latestDate],
     );
