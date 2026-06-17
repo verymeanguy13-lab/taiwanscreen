@@ -316,23 +316,23 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           js.setData(data.candles.map((c, i) => data.indicators.kdj.j[i] != null ? { time: c.date as string, value: data.indicators.kdj.j[i]! } : null).filter(Boolean) as { time: string; value: number }[]);
         }
 
-        // ── Sync time scales — apply immediately + subscribe to changes ──────
-        // Use requestAnimationFrame so both charts have finished their first render
+        // ── Sync time scales ─────────────────────────────────────────────────
+        // Sub chart only has 44 days of data. We fit its content first, then
+        // sync the RIGHT EDGE only so it always stays aligned with the main chart.
         requestAnimationFrame(() => {
-          const mainRange = chart.timeScale().getVisibleLogicalRange();
-          if (mainRange) {
-            subChart.timeScale().setVisibleLogicalRange(mainRange);
-          } else {
-            subChart.timeScale().fitContent();
-          }
+          subChart.timeScale().fitContent();
+
+          // After fitting, sync the scroll position so right edges align
+          const mainRightOffset = chart.timeScale().scrollPosition();
+          subChart.timeScale().scrollToPosition(mainRightOffset, false);
         });
 
-        // Keep sub chart in sync whenever user scrolls or zooms main chart
-        chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-          if (range && subChartRef.current) {
-            (subChartRef.current as { timeScale: () => { setVisibleLogicalRange: (r: unknown) => void } })
-              .timeScale().setVisibleLogicalRange(range);
-          }
+        // Keep sub chart scroll position in sync with main chart
+        chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+          if (!subChartRef.current) return;
+          const pos = chart.timeScale().scrollPosition();
+          (subChartRef.current as { timeScale: () => { scrollToPosition: (p: number, a: boolean) => void } })
+            .timeScale().scrollToPosition(pos, false);
         });
       }
 
