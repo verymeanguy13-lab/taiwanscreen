@@ -97,12 +97,7 @@ export async function GET(req: NextRequest) {
 
             if (!strategies || strategies.length === 0 || score <= 0) return null;
 
-            // Momentum gate for bull: require rising price on latest candle
-            if (side === 'bull') {
-              const last = candles[candles.length - 1];
-              const prev = candles[candles.length - 2];
-              if (last.close <= prev.close) return null;
-            }
+            if (!strategies || strategies.length === 0 || score <= 0) return null;
 
             const latestCandle = candles[candles.length - 1];
             const prevCandle   = candles[candles.length - 2];
