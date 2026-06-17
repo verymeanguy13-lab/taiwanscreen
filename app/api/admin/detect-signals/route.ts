@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
                    (symbol, signal_type, signal_date, entry_price, confidence, industry)
                  VALUES ($1,$2,$3,$4,$5,$6)
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-                [symbol, s, todayDate, Number(today.close), Math.min(100, Math.round((afterHours.bullScore / 106) * 100)), sector],
+                [symbol, s, todayDate, Number(today.close), Math.min(100, Math.round((afterHours.bullScore / 48) * 100)), sector],
               );
               symbolSignals++; newSignals++;
             } catch { /* skip */ }
