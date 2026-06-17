@@ -33,7 +33,8 @@ function toISO(d: Date): string {
 // Get last N business days (not including today)
 function pastBusinessDays(n: number): Date[] {
   const days: Date[] = [];
-  const d = new Date();
+  const now = new Date();
+  const d = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   while (days.length < n) {
     d.setDate(d.getDate() - 1);
     const dow = d.getDay();
