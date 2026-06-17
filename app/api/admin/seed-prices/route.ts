@@ -18,7 +18,8 @@ function toISO(d: Date): string {
 
 function pastBusinessDays(n: number, offset: number = 0): Date[] {
   const days: Date[] = [];
-  const d = new Date();
+  const now = new Date();
+  const d = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   let skipped = 0;
   while (days.length < n) {
     d.setDate(d.getDate() - 1);
