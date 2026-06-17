@@ -15,7 +15,6 @@ export async function GET(req: NextRequest) {
   const industry = searchParams.get('industry') ?? '';
 
   try {
-    // ── Get latest signal date ──────────────────────────────────────────────
     const dateRows = await queryUnsafe<{ max: string }>(
       `SELECT MAX(signal_date)::text AS max FROM signal_results`,
       [],
@@ -26,7 +25,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ results: [], totalScanned: 0, signalCounts: {} });
     }
 
-    // ── Fetch today's signals joined with stock info and latest price ───────
     const rows = await queryUnsafe<{
       symbol:       string;
       name_zh:      string;
@@ -65,7 +63,6 @@ export async function GET(req: NextRequest) {
       [latestDate],
     );
 
-    // ── Get total stocks scanned (stocks with price data that day) ──────────
     const totalRows = await queryUnsafe<{ count: number }>(
       `SELECT COUNT(DISTINCT symbol)::int AS count
        FROM daily_prices WHERE date = $1`,
@@ -73,7 +70,6 @@ export async function GET(req: NextRequest) {
     );
     const totalScanned = totalRows[0]?.count ?? 0;
 
-    // ── Map signal_type to breakoutType for UI compatibility ────────────────
     const SIGNAL_TO_BREAKOUT: Record<string, string> = {
       '上漲趨勢突破': '上漲趨勢突破',
       '箱型整理突破': '箱型整理突破',
@@ -85,7 +81,6 @@ export async function GET(req: NextRequest) {
       '近五日強勢股': '上漲趨勢突破',
     };
 
-    // Deduplicate — keep highest confidence signal per symbol
     const symbolMap = new Map<string, typeof rows[0]>();
     for (const row of rows) {
       const existing = symbolMap.get(row.symbol);
@@ -94,13 +89,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Apply industry filter
     let filtered = Array.from(symbolMap.values());
     if (industry) {
       filtered = filtered.filter(r => r.sector === industry);
     }
 
-    // Build results
     const results = filtered.map(r => {
       const close     = Number(r.close)     || Number(r.entry_price) || 0;
       const prevClose = Number(r.prev_close) || 0;
@@ -122,7 +115,6 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Sort by confidence desc
     results.sort((a, b) => b.confidence - a.confidence);
 
     const signalCounts = {
