@@ -147,7 +147,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
         return {
           symbol:     r.Code.trim(),
           name_zh:    r.Name.trim(),
-          volume:     parseNum(r.TradeVolume),
+          volume:     Math.round(parseNum(r.TradeVolume) / 1000),
           open:       parseNum(r.OpeningPrice),
           high:       parseNum(r.HighestPrice),
           low:        parseNum(r.LowestPrice),
@@ -185,7 +185,7 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
           return {
             symbol:     r.SecuritiesCompanyCode.trim(),
             name_zh:    r.CompanyName?.trim() ?? '',
-            volume:     parseNum(r.TradingShares),
+            volume:     Math.round(parseNum(r.TradingShares) / 1000),
             open:       parseNum(r.Open),
             high:       parseNum(r.High),
             low:        parseNum(r.Low),
