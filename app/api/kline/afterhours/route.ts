@@ -99,6 +99,20 @@ export async function GET(req: NextRequest) {
 
             if (!strategies || strategies.length === 0 || score <= 0) return null;
 
+            // Quality gate: filter out illiquid and flat stocks
+            const last5 = candles.slice(-5);
+            const avg5vol = last5.reduce((s, c) => s + (c.volume ?? 0), 0) / 5;
+            const latestVol = candles[candles.length - 1].volume ?? 0;
+            const close5dAgo = candles[candles.length - 5]?.close ?? 0;
+            const closeNow = candles[candles.length - 1].close;
+
+            // Skip if: average volume < 1000 lots, latest volume < 500 lots,
+            // or price hasn't risen over last 5 days
+            if (avg5vol < 1000) return null;
+            if (latestVol < 500) return null;
+            if (side === 'bull' && closeNow <= close5dAgo) return null;
+            if (side === 'bear' && closeNow >= close5dAgo) return null;
+
             const latestCandle = candles[candles.length - 1];
             const prevCandle   = candles[candles.length - 2];
             const changePercent = prevCandle?.close
