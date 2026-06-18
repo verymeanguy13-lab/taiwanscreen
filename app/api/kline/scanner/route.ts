@@ -1,133 +1,135 @@
+// =============================================================================
+// app/api/kline/scanner/route.ts
+// GET /api/kline/scanner?type=all|uptrend|box|vreversal&industry=xxx
+//
+// Reads from signal_results table (populated by detect-signals cron).
+// No live recalculation — fast and consistent with what was detected.
+// Cache: s-maxage=300 (5 minutes)
+// =============================================================================
+
 import { NextRequest, NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
-import { computeIndicators } from '@/lib/indicators';
-import { detectAllBreakouts } from '@/lib/breakouts';
-import { evaluateSignalMatrix } from '@/lib/signals';
+import { queryUnsafe } from '@/lib/db';
 
-export const runtime = 'nodejs';
-
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const type = searchParams.get('type') || 'all';
-  const industry = searchParams.get('industry') || null;
+export async function GET(req: NextRequest) {
+  const { searchParams } = req.nextUrl;
+  const industry = searchParams.get('industry') ?? '';
 
   try {
-    // 1. Fetch all symbols that have recent price data
-    const symbolRows = await sql`
-      SELECT DISTINCT dp.symbol, s.name_zh, s.sector
-      FROM daily_prices dp
-      JOIN stocks s ON s.symbol = dp.symbol
-      WHERE dp.date >= NOW() - INTERVAL '5 days'
-      ORDER BY dp.symbol
-    `;
+    const dateRows = await queryUnsafe<{ max: string }>(
+      `SELECT MAX(signal_date)::text AS max FROM signal_results`,
+      [],
+    );
+    const latestDate = String(dateRows[0]?.max ?? '').slice(0, 10);
 
-    const symbols = symbolRows as { symbol: string; name_zh: string; sector: string }[];
-
-    const results: Array<{
-      symbol: string;
-      name_zh: string;
-      sector: string;
-      confidence: number;
-      signalType: string;
-      matrixScore: number;
-      breakouts: ReturnType<typeof detectAllBreakouts>;
-    }> = [];
-
-    // 2. Process in batches of 20
-    const BATCH_SIZE = 20;
-    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-      const batch = symbols.slice(i, i + BATCH_SIZE);
-
-      await Promise.allSettled(
-        batch.map(async ({ symbol, name_zh, sector }) => {
-          try {
-            // Fetch 60 days of price data
-            const priceRows = await sql`
-              SELECT date, open, high, low, close, volume
-              FROM daily_prices
-              WHERE symbol = ${symbol}
-              ORDER BY date DESC
-              LIMIT 60
-            `;
-
-            const candles = (priceRows as any[])
-              .reverse()
-              .map((r) => ({
-                date: r.date,
-                open: Number(r.open),
-                high: Number(r.high),
-                low: Number(r.low),
-                close: Number(r.close),
-                volume: Number(r.volume),
-              }));
-
-            if (candles.length < 20) return;
-
-            // Compute indicators
-            const indicators = computeIndicators(candles);
-
-            // Run breakout detection
-            const breakouts = detectAllBreakouts(candles, indicators);
-
-            // Run signal matrix
-            const matrix = evaluateSignalMatrix(candles, indicators, [], []);
-            const matrixScore = matrix.score ?? 0;
-
-            const breakoutFired = breakouts.some((b) => b.triggered);
-
-            // Keep if breakout fired OR matrix score > 55
-            if (!breakoutFired && matrixScore <= 55) return;
-
-            // Determine signal type
-            let signalType = 'uptrend';
-            if (breakouts.find((b) => b.triggered && b.type === '箱型整理突破')) {
-              signalType = 'box';
-            } else if (breakouts.find((b) => b.triggered && b.type === '下跌V轉突破')) {
-              signalType = 'vreversal';
-            }
-
-            // Apply type filter
-            if (type !== 'all' && signalType !== type) return;
-
-            // Apply industry filter
-            if (industry && sector !== industry) return;
-
-            const confidence = breakoutFired
-              ? Math.max(...breakouts.filter((b) => b.triggered).map((b) => b.confidence ?? 50))
-              : matrixScore;
-
-            results.push({ symbol, name_zh, sector, confidence, signalType, matrixScore, breakouts });
-          } catch {
-            // Skip stocks that error
-          }
-        })
-      );
+    if (!latestDate) {
+      return NextResponse.json({ results: [], totalScanned: 0, signalCounts: {} });
     }
 
-    // 3. Sort by confidence desc, return top 100
+    const rows = await queryUnsafe<{
+      symbol:       string;
+      name_zh:      string;
+      sector:       string;
+      signal_type:  string;
+      entry_price:  number;
+      confidence:   number;
+      close:        number;
+      prev_close:   number;
+      volume:       number;
+    }>(
+      `SELECT
+         sr.symbol,
+         s.name_zh,
+         COALESCE(s.sector, '') AS sector,
+         sr.signal_type,
+         sr.entry_price,
+         sr.confidence,
+         dp.close,
+         dp_prev.close AS prev_close,
+         dp.volume
+       FROM signal_results sr
+       JOIN stocks s ON s.symbol = sr.symbol
+       LEFT JOIN daily_prices dp
+         ON dp.symbol = sr.symbol
+         AND dp.date = $1
+       LEFT JOIN daily_prices dp_prev
+         ON dp_prev.symbol = sr.symbol
+         AND dp_prev.date = (
+           SELECT MAX(date) FROM daily_prices
+           WHERE symbol = sr.symbol AND date < $1
+         )
+       WHERE sr.signal_date = $1
+       AND sr.confidence >= 50
+       ORDER BY sr.confidence DESC`,
+      [latestDate],
+    );
+
+    const totalRows = await queryUnsafe<{ count: number }>(
+      `SELECT COUNT(DISTINCT symbol)::int AS count
+       FROM daily_prices WHERE date = $1`,
+      [latestDate],
+    );
+    const totalScanned = totalRows[0]?.count ?? 0;
+
+    const SIGNAL_TO_BREAKOUT: Record<string, string> = {
+      '上漲趨勢突破': '上漲趨勢突破',
+      '箱型整理突破': '箱型整理突破',
+      '下跌V轉突破':  '下跌V轉突破',
+      '突破趨勢線':   '上漲趨勢突破',
+      '開布林':       '箱型整理突破',
+      '剛轉多':       '下跌V轉突破',
+      '昨日強勢股':   '上漲趨勢突破',
+      '近五日強勢股': '上漲趨勢突破',
+    };
+
+    const symbolMap = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      const existing = symbolMap.get(row.symbol);
+      if (!existing || row.confidence > existing.confidence) {
+        symbolMap.set(row.symbol, row);
+      }
+    }
+
+    let filtered = Array.from(symbolMap.values());
+    if (industry) {
+      filtered = filtered.filter(r => r.sector === industry);
+    }
+
+    const results = filtered.map(r => {
+      const close     = Number(r.close)     || Number(r.entry_price) || 0;
+      const prevClose = Number(r.prev_close) || 0;
+      const changePercent = prevClose > 0
+        ? Math.round(((close - prevClose) / prevClose) * 10000) / 100
+        : 0;
+
+      return {
+        symbol:       r.symbol,
+        name_zh:      r.name_zh,
+        sector:       r.sector,
+        breakoutType: SIGNAL_TO_BREAKOUT[r.signal_type] ?? '上漲趨勢突破',
+        signalLabel:  r.signal_type,
+        confidence:   Number(r.confidence) || 50,
+        matrixScore:  Number(r.confidence) || 50,
+        price:        close,
+        changePercent,
+        volume:       Number(r.volume) || 0,
+      };
+    });
+
     results.sort((a, b) => b.confidence - a.confidence);
-    const top100 = results.slice(0, 100);
 
     const signalCounts = {
-      uptrend: top100.filter((r) => r.signalType === 'uptrend').length,
-      box: top100.filter((r) => r.signalType === 'box').length,
-      vreversal: top100.filter((r) => r.signalType === 'vreversal').length,
+      uptrend:   results.filter(r => r.breakoutType === '上漲趨勢突破').length,
+      box:       results.filter(r => r.breakoutType === '箱型整理突破').length,
+      vreversal: results.filter(r => r.breakoutType === '下跌V轉突破').length,
     };
 
     return NextResponse.json(
-      {
-        results: top100,
-        totalScanned: symbols.length,
-        signalCounts,
-      },
-      {
-        headers: {
-          'Cache-Control': 's-maxage=3600',
-        },
-      }
+      { results, totalScanned, signalCounts, date: latestDate },
+      { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } },
     );
-  } catch (error) {
-    console.error('Scanner error:', error);
-    return NextResponse.json({ error: 'Scanner failed' }, { status: 500 });
+
+  } catch (err) {
+    console.error('[kline/scanner] Unexpected error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
