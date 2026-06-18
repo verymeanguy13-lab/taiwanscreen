@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
               sma60:         sma(closes, 60),
               rsi14:         rsi(closes, 14),
               macd:          macd(closes),
-              kdj:           kdj(candles),
+              kdj:           kdj(candles.map(c => c.high), candles.map(c => c.low), closes),
               bollinger:     bollingerBands(closes),
               atr14:         atr(candles),
               obv:           obv(candles),
