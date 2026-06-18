@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { sma, rsi, volumeRatio } from '@/lib/indicators';
+import { sma, rsi, macd, kdj, bollingerBands, obv, volumeRatio } from '@/lib/indicators';
 import { detectAllBreakouts } from '@/lib/breakouts';
 import { evaluateSignalMatrix } from '@/lib/signals';
 
@@ -60,14 +60,23 @@ export async function GET(request: NextRequest) {
 
             if (candles.length < 20) return;
 
-            const closes = candles.map(c => c.close);
+            const closes  = candles.map(c => c.close);
+            const highs   = candles.map(c => c.high);
+            const lows    = candles.map(c => c.low);
             const volumes = candles.map(c => c.volume);
+
+            const kdjResult = kdj(highs, lows, closes);
+
             const indicators = {
-              sma5:        sma(closes, 5),
-              sma20:       sma(closes, 20),
-              sma60:       sma(closes, 60),
-              rsi14:       rsi(closes, 14),
-              volumeRatio: volumeRatio(volumes, 5),
+              sma5:     sma(closes, 5),
+              sma20:    sma(closes, 20),
+              sma60:    sma(closes, 60),
+              rsi14:    rsi(closes, 14),
+              macd:     macd(closes),
+              kd:       { k: kdjResult.k, d: kdjResult.d },
+              bb:       bollingerBands(closes),
+              obv:      obv(candles),
+              volRatio: volumeRatio(volumes, 5),
             };
 
             const breakouts = detectAllBreakouts(candles, indicators);
@@ -107,8 +116,8 @@ export async function GET(request: NextRequest) {
         results: top100,
         totalScanned: symbols.length,
         signalCounts: {
-          uptrend:  top100.filter((r) => r.signalType === 'uptrend').length,
-          box:      top100.filter((r) => r.signalType === 'box').length,
+          uptrend:   top100.filter((r) => r.signalType === 'uptrend').length,
+          box:       top100.filter((r) => r.signalType === 'box').length,
           vreversal: top100.filter((r) => r.signalType === 'vreversal').length,
         },
       },
