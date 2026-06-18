@@ -132,14 +132,13 @@ export async function GET(req: NextRequest) {
   const backfillResults: Record<string, number> = {};
 
   // ── Self-healing: check for missing days and backfill ─────────────────────
-  // Check last 3 business days — if any are missing prices, backfill them
   const recentDays = pastBusinessDays(3);
   const [latestPrice] = await sql`SELECT MAX(date) as d FROM daily_prices`;
   const latestPriceDate = latestPrice?.d ? String(latestPrice.d).slice(0, 10) : null;
 
   for (const day of recentDays) {
     const isoDate = toISO(day);
-    if (latestPriceDate && isoDate <= latestPriceDate) continue; // already have it
+    if (latestPriceDate && isoDate <= latestPriceDate) continue;
 
     console.log(`[cron/daily] Missing prices for ${isoDate}, backfilling...`);
     const count = await backfillPricesForDate(toTWSEDate(day), isoDate);
@@ -193,6 +192,12 @@ export async function GET(req: NextRequest) {
   await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/cron/alerts`, {
     headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
   }).catch(err => console.error('[daily] alerts cron error:', err));
+
+  // Trigger detect-signals in background (non-blocking)
+  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/admin/detect-signals?offset=0&limit=200`, {
+    method: 'POST',
+    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  }).catch(err => console.error('[daily] detect-signals error:', err));
 
   console.log(`[cron/daily] Completed for ${taiwanDate}. Errors: ${allErrors.length}`);
 
