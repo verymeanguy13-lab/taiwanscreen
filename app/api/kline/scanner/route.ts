@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { sma, rsi, macd, kdj, bollingerBands, obv, volumeRatio } from '@/lib/indicators';
+import { computeIndicators } from '@/lib/indicators';
 import { detectAllBreakouts } from '@/lib/breakouts';
 import { evaluateSignalMatrix } from '@/lib/signals';
 
@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const industry = searchParams.get('industry') || null;
 
   try {
+    // 1. Fetch all symbols that have recent price data
     const symbolRows = await sql`
       SELECT DISTINCT dp.symbol, s.name_zh, s.sector
       FROM daily_prices dp
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
       breakouts: ReturnType<typeof detectAllBreakouts>;
     }> = [];
 
+    // 2. Process in batches of 20
     const BATCH_SIZE = 20;
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
       const batch = symbols.slice(i, i + BATCH_SIZE);
@@ -39,6 +41,7 @@ export async function GET(request: NextRequest) {
       await Promise.allSettled(
         batch.map(async ({ symbol, name_zh, sector }) => {
           try {
+            // Fetch 60 days of price data
             const priceRows = await sql`
               SELECT date, open, high, low, close, volume
               FROM daily_prices
@@ -60,68 +63,68 @@ export async function GET(request: NextRequest) {
 
             if (candles.length < 20) return;
 
-            const closes  = candles.map(c => c.close);
-            const highs   = candles.map(c => c.high);
-            const lows    = candles.map(c => c.low);
-            const volumes = candles.map(c => c.volume);
+            // Compute indicators
+            const indicators = computeIndicators(candles);
 
-            const kdjResult = kdj(highs, lows, closes);
-
-            const indicators = {
-              sma5:     sma(closes, 5),
-              sma20:    sma(closes, 20),
-              sma60:    sma(closes, 60),
-              rsi14:    rsi(closes, 14),
-              macd:     macd(closes),
-              kd:       { k: kdjResult.k, d: kdjResult.d },
-              bb:       bollingerBands(closes),
-              obv:      obv(candles),
-              volRatio: volumeRatio(volumes, 5),
-            };
-
+            // Run breakout detection
             const breakouts = detectAllBreakouts(candles, indicators);
-            const matrix = evaluateSignalMatrix(candles, indicators);
-            const matrixScore = matrix.matrixScore ?? 0;
-            const breakoutFired = breakouts.length > 0;
 
+            // Run signal matrix
+            const matrix = evaluateSignalMatrix(candles, indicators, [], []);
+            const matrixScore = matrix.score ?? 0;
+
+            const breakoutFired = breakouts.some((b) => b.triggered);
+
+            // Keep if breakout fired OR matrix score > 55
             if (!breakoutFired && matrixScore <= 55) return;
 
+            // Determine signal type
             let signalType = 'uptrend';
-            if (breakouts.find((b) => b.type === '箱型整理突破')) {
+            if (breakouts.find((b) => b.triggered && b.type === '箱型整理突破')) {
               signalType = 'box';
-            } else if (breakouts.find((b) => b.type === '下跌V轉突破')) {
+            } else if (breakouts.find((b) => b.triggered && b.type === '下跌V轉突破')) {
               signalType = 'vreversal';
             }
 
+            // Apply type filter
             if (type !== 'all' && signalType !== type) return;
+
+            // Apply industry filter
             if (industry && sector !== industry) return;
 
             const confidence = breakoutFired
-              ? Math.max(...breakouts.map((b) => b.confidence ?? 50))
+              ? Math.max(...breakouts.filter((b) => b.triggered).map((b) => b.confidence ?? 50))
               : matrixScore;
 
             results.push({ symbol, name_zh, sector, confidence, signalType, matrixScore, breakouts });
           } catch {
-            // skip
+            // Skip stocks that error
           }
         })
       );
     }
 
+    // 3. Sort by confidence desc, return top 100
     results.sort((a, b) => b.confidence - a.confidence);
     const top100 = results.slice(0, 100);
+
+    const signalCounts = {
+      uptrend: top100.filter((r) => r.signalType === 'uptrend').length,
+      box: top100.filter((r) => r.signalType === 'box').length,
+      vreversal: top100.filter((r) => r.signalType === 'vreversal').length,
+    };
 
     return NextResponse.json(
       {
         results: top100,
         totalScanned: symbols.length,
-        signalCounts: {
-          uptrend:   top100.filter((r) => r.signalType === 'uptrend').length,
-          box:       top100.filter((r) => r.signalType === 'box').length,
-          vreversal: top100.filter((r) => r.signalType === 'vreversal').length,
-        },
+        signalCounts,
       },
-      { headers: { 'Cache-Control': 's-maxage=3600' } }
+      {
+        headers: {
+          'Cache-Control': 's-maxage=3600',
+        },
+      }
     );
   } catch (error) {
     console.error('Scanner error:', error);
