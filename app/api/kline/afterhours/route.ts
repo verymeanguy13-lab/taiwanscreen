@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { sma, rsi, macd, kdj, bollingerBands, atr, obv, volumeRatio } from '@/lib/indicators';
+import { sma, bollingerBands } from '@/lib/indicators';
 import { evaluateAfterHours } from '@/lib/bullbearSignals';
 
 export const runtime = 'nodejs';
@@ -51,19 +51,12 @@ export async function GET(request: NextRequest) {
 
             if (candles.length < 20) return;
 
-            const closes  = candles.map(c => c.close);
-            const volumes = candles.map(c => c.volume);
+            const closes = candles.map(c => c.close);
             const indicators = {
-              sma5:          sma(closes, 5),
-              sma20:         sma(closes, 20),
-              sma60:         sma(closes, 60),
-              rsi14:         rsi(closes, 14),
-              macd:          macd(closes),
-              kdj:           kdj(candles.map(c => c.high), candles.map(c => c.low), closes),
-              bollinger:     bollingerBands(closes),
-              atr14:         atr(candles),
-              obv:           obv(candles),
-              volumeRatio:   volumeRatio(volumes, 5),
+              sma5:  sma(closes, 5),
+              sma20: sma(closes, 20),
+              sma60: sma(closes, 60),
+              bb:    bollingerBands(closes),
             };
 
             const afterHours = evaluateAfterHours(candles, indicators);
