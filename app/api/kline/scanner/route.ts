@@ -82,14 +82,14 @@ export async function GET(request: NextRequest) {
             const breakouts = detectAllBreakouts(candles, indicators);
             const matrix = evaluateSignalMatrix(candles, indicators);
             const matrixScore = matrix.matrixScore ?? 0;
-            const breakoutFired = breakouts.some((b) => b.triggered);
+            const breakoutFired = breakouts.length > 0;
 
             if (!breakoutFired && matrixScore <= 55) return;
 
             let signalType = 'uptrend';
-            if (breakouts.find((b) => b.triggered && b.type === '箱型整理突破')) {
+            if (breakouts.find((b) => b.type === '箱型整理突破')) {
               signalType = 'box';
-            } else if (breakouts.find((b) => b.triggered && b.type === '下跌V轉突破')) {
+            } else if (breakouts.find((b) => b.type === '下跌V轉突破')) {
               signalType = 'vreversal';
             }
 
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
             if (industry && sector !== industry) return;
 
             const confidence = breakoutFired
-              ? Math.max(...breakouts.filter((b) => b.triggered).map((b) => b.confidence ?? 50))
+              ? Math.max(...breakouts.map((b) => b.confidence ?? 50))
               : matrixScore;
 
             results.push({ symbol, name_zh, sector, confidence, signalType, matrixScore, breakouts });
