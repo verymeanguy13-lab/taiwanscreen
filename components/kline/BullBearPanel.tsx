@@ -13,8 +13,8 @@ const BORDER   = '#1E2235';
 const UP_COLOR = '#FF4D6D';
 const DN_COLOR = '#00D4AA';
 
-const BULL_STRATEGIES = ['昨日強勢股','近五日強勢股','近十日強勢股','開布林','突破均線','突破壓力','剛轉多','突破趨勢線'];
-const BEAR_STRATEGIES = ['昨日弱勢股','近五日弱勢股','近十日弱勢股','跌破布林','跌破均線','空頭排列','剛轉空','綠柱放大'];
+const BULL_STRATEGIES = ['?�日強勢??,'近�??�強?�股','近�??�強?�股','?��???,'突破?��?','突破壓�?','?��?�?,'突破趨勢�?];
+const BEAR_STRATEGIES = ['?�日弱勢??,'近�??�弱?�股','近�??�弱?�股','跌破布�?','跌破?��?','空頭?��?','?��?�?,'綠柱?�大'];
 
 type Period = 30 | 60 | 90;
 
@@ -36,7 +36,7 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
   if (isLoading) return <Skeleton style={{ height: 400, borderRadius: 8 }} />;
   if (error || !data) return (
     <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B8FA8', fontSize: 13 }}>
-      無法載入資料
+      ?��?載入資�?
     </div>
   );
 
@@ -45,7 +45,7 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
   const indicators = data.indicators ?? {};
   const afterHours = data.afterHours ?? { bullStrategies: [], bearStrategies: [], bullScore: 0, bearScore: 0 };
 
-  // ── S5: 60-day bull/bear chart data ──
+  // ?�?� S5: 60-day bull/bear chart data ?�?�
   const sliced    = candles.slice(-period);
   const closes    = sliced.map((c: any) => c.close);
   const volumes   = sliced.map((c: any) => c.volume ?? 0);
@@ -75,11 +75,11 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
 
   const DIMENSIONS = [
     { key: 'trend',     label: '趨勢' },
-    { key: 'momentum',  label: '動能' },
-    { key: 'volume',    label: '量能' },
+    { key: 'momentum',  label: '?�能' },
+    { key: 'volume',    label: '?�能' },
     { key: 'chips',     label: '籌碼' },
-    { key: 'pattern',   label: '型態' },
-    { key: 'sentiment', label: '情緒' },
+    { key: 'pattern',   label: '?��?' },
+    { key: 'sentiment', label: '?��?' },
   ];
 
   const readingColor =
@@ -104,12 +104,12 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
                 {score.technicalReading}
               </span>
               <span style={{ fontSize: 11, color: '#8B8FA8', alignSelf: 'center' }}>
-                綜合評分 {score.overall}/100
+                綜�?評�? {score.overall}/100
               </span>
             </div>
           </>
         ) : (
-          <div style={{ color: '#8B8FA8', fontSize: 13, padding: 24 }}>暫無評分資料</div>
+          <div style={{ color: '#8B8FA8', fontSize: 13, padding: 24 }}>?�無評�?資�?</div>
         )}
       </div>
 
@@ -155,63 +155,10 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
 
       {/* S3: Trend strength chart */}
       <div style={{ background: '#0F1117', border: `1px solid ${BORDER}`, borderRadius: 8, padding: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 8 }}>趨勢力道</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 8 }}>趨勢?��?</div>
         <TrendStrengthChart signals={[]} isLoading={false} />
         <div style={{ fontSize: 11, color: '#8B8FA8', textAlign: 'center', marginTop: 6 }}>
-          盤中訊號將於開盤後顯示
-        </div>
-      </div>
-
-      {/* S4: After-hours match */}
-      <div style={{ background: '#0F1117', border: `1px solid ${BORDER}`, borderRadius: 8, padding: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 10 }}>盤後技術匹配</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {/* Bull */}
-          <div>
-            <div style={{ fontSize: 11, color: UP_COLOR, fontWeight: 600, marginBottom: 6 }}>多方策略</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {BULL_STRATEGIES.map(s => {
-                const matched = afterHours.bullStrategies?.includes(s);
-                return (
-                  <span key={s} style={{
-                    fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 600,
-                    color:       matched ? UP_COLOR   : '#8B8FA8',
-                    background:  matched ? `${UP_COLOR}18` : '#1E2235',
-                    border:      `1px solid ${matched ? UP_COLOR + '44' : BORDER}`,
-                  }}>
-                    {s}
-                  </span>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 10, color: '#8B8FA8', marginTop: 6 }}>
-              符合 {afterHours.bullStrategies?.length ?? 0} 項多方指標
-            </div>
-          </div>
-
-          {/* Bear */}
-          <div>
-            <div style={{ fontSize: 11, color: DN_COLOR, fontWeight: 600, marginBottom: 6 }}>空方策略</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {BEAR_STRATEGIES.map(s => {
-                const matched = afterHours.bearStrategies?.includes(s);
-                return (
-                  <span key={s} style={{
-                    fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 600,
-                    color:       matched ? DN_COLOR   : '#8B8FA8',
-                    background:  matched ? `${DN_COLOR}18` : '#1E2235',
-                    border:      `1px solid ${matched ? DN_COLOR + '44' : BORDER}`,
-                  }}>
-                    {s}
-                  </span>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 10, color: '#8B8FA8', marginTop: 6 }}>
-              符合 {afterHours.bearStrategies?.length ?? 0} 項空方指標
-            </div>
-          </div>
-        </div>
+          ?�中訊�?將於?�盤後顯�?        </div>
       </div>
 
       {/* S5: 60-day bull/bear chart */}
@@ -226,8 +173,7 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
                 background: period === p ? `${DN_COLOR}22` : 'transparent',
                 color: period === p ? DN_COLOR : '#8B8FA8',
               }}>
-                {p}天
-              </button>
+                {p}�?              </button>
             ))}
           </div>
         </div>
