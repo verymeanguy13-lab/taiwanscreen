@@ -2,7 +2,7 @@
 
 import {
   BarChart, Bar, XAxis, YAxis, ReferenceLine,
-  Tooltip, ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell,
 } from 'recharts';
 import type { IntradaySignalEvent } from '@/lib/bullbearSignals';
 import { computeTrendStrength } from '@/lib/bullbearSignals';
@@ -14,25 +14,6 @@ interface Props {
 
 const UP_COLOR   = '#FF4D6D';
 const DOWN_COLOR = '#00D4AA';
-
-function CustomTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div style={{
-      background: '#0F1117', border: '1px solid #1E2235',
-      borderRadius: 6, padding: '8px 12px', fontSize: 11,
-    }}>
-      <div style={{ color: '#8B8FA8', marginBottom: 4 }}>{d.time}</div>
-      {d.signals.map((s: string, i: number) => (
-        <div key={i} style={{ color: d.value >= 0 ? UP_COLOR : DOWN_COLOR }}>{s}</div>
-      ))}
-      <div style={{ color: '#fff', marginTop: 4, fontWeight: 700 }}>
-        {d.value >= 0 ? '+' : ''}{d.value}
-      </div>
-    </div>
-  );
-}
 
 export function TrendStrengthChart({ signals, isLoading }: Props) {
   const trend = computeTrendStrength(signals);
@@ -92,7 +73,6 @@ export function TrendStrengthChart({ signals, isLoading }: Props) {
           <XAxis dataKey="time" tick={{ fill: '#8B8FA8', fontSize: 9 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: '#8B8FA8', fontSize: 9 }} axisLine={false} tickLine={false} />
           <ReferenceLine y={0} stroke="#1E2235" />
-          <Tooltip content={<CustomTooltip />} />
           <Bar dataKey="value" radius={[2, 2, 0, 0]}>
             {trend.bars.map((entry, i) => (
               <Cell key={i} fill={entry.value >= 0 ? UP_COLOR : DOWN_COLOR} />
