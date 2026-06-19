@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const side = (searchParams.get('side') ?? 'bull') as 'bull' | 'bear';
 
-  const cacheKey = `afterhours:${side}`;
+  const cacheKey = `afterhours:${side}:${new Date().toISOString().slice(0, 10)}`;
 
   try {
     const result = await cached(cacheKey, 1800, async () => {
