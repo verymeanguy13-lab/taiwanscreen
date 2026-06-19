@@ -199,6 +199,15 @@ export async function GET(req: NextRequest) {
     headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
   }).catch(err => console.error('[daily] detect-signals error:', err));
 
+  // Trigger afterhours cache build in background (non-blocking)
+  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/kline/afterhours?side=bull`, {
+    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  }).catch(err => console.error('[daily] afterhours bull error:', err));
+
+  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/kline/afterhours?side=bear`, {
+    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  }).catch(err => console.error('[daily] afterhours bear error:', err));
+
   console.log(`[cron/daily] Completed for ${taiwanDate}. Errors: ${allErrors.length}`);
 
   return NextResponse.json({
