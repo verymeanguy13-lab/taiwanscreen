@@ -3,10 +3,9 @@
 // GET /api/kline/afterhours?side=bull|bear
 //
 // Uses computeScore (same as individual stock page) for consistency.
-// Bull = technicalReading '技術面強勢' or '偏多訊號' (overall >= 60)
-// Bear = technicalReading '偏空訊號' or '技術面弱勢' (overall < 40)
+// Bull = overall >= 60, Bear = overall < 40
 // Quality gate: avg5vol >= 1000, latest vol >= 500
-// Cache: 30 minutes
+// Cache: 12 hours (survives Vercel cold starts via CDN)
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -14,17 +13,16 @@ import { queryUnsafe } from '@/lib/db';
 import { cached } from '@/lib/cache';
 import type { Candle } from '@/types';
 import { computeScore } from '@/lib/scoring';
-import { sma, ema, rsi as calcRsi, macd as calcMacd, kdj, bollingerBands, atr, obv, volumeRatio } from '@/lib/indicators';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const side = (searchParams.get('side') ?? 'bull') as 'bull' | 'bear';
 
-  const cacheKey = `afterhours:${side}:${new Date().toISOString().slice(0, 10)}`;
+  const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const cacheKey = `afterhours:${side}:${today}`;
 
   try {
-    const result = await cached(cacheKey, 1800, async () => {
-      // Fetch all stocks with recent price data
+    const result = await cached(cacheKey, 43200, async () => {
       const stockRows = await queryUnsafe<{ symbol: string; name_zh: string; sector: string }>(
         `SELECT DISTINCT s.symbol, s.name_zh, COALESCE(s.sector, '') AS sector
          FROM stocks s
@@ -78,7 +76,6 @@ export async function GET(req: NextRequest) {
               date:   r.date,
             }));
 
-            // ── Quality gate: filter illiquid and flat stocks ──────────────
             const last5 = candles.slice(-5);
             const avg5vol = last5.reduce((s, c) => s + (c.volume ?? 0), 0) / 5;
             const latestVol = candles[candles.length - 1].volume ?? 0;
@@ -86,12 +83,9 @@ export async function GET(req: NextRequest) {
             if (avg5vol < 1000) return null;
             if (latestVol < 500) return null;
 
-            // ── Run computeScore — same as individual stock page ───────────
             const scoreResult = computeScore(candles);
             const { overall, technicalReading, dimensions } = scoreResult;
 
-            // Bull: strong or leaning bullish (overall >= 60)
-            // Bear: weak or leaning bearish (overall < 40)
             const isBull = overall >= 60;
             const isBear = overall < 40;
 
@@ -104,7 +98,6 @@ export async function GET(req: NextRequest) {
               ? ((latestCandle.close - prevCandle.close) / prevCandle.close) * 100
               : 0;
 
-            // Use the highest dimension score as the signal label
             const topDimension = Object.entries(dimensions)
               .sort(([, a], [, b]) => b.score - a.score)[0];
 
@@ -138,7 +131,6 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Sort by confidence descending
       results.sort((a, b) => b.confidence - a.confidence);
 
       return {
@@ -148,7 +140,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(result, {
-      headers: { 'Cache-Control': 's-maxage=1800, stale-while-revalidate=300' },
+      headers: { 'Cache-Control': 's-maxage=43200, stale-while-revalidate=3600' },
     });
   } catch (err) {
     console.error('[afterhours] Error:', err);
