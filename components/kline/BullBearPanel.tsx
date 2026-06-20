@@ -13,8 +13,6 @@ const BORDER   = '#1E2235';
 const UP_COLOR = '#FF4D6D';
 const DN_COLOR = '#00D4AA';
 
-
-
 type Period = 30 | 60 | 90;
 
 function sma(arr: number[], period: number): (number | null)[] {
@@ -35,16 +33,14 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
   if (isLoading) return <Skeleton style={{ height: 400, borderRadius: 8 }} />;
   if (error || !data) return (
     <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B8FA8', fontSize: 13 }}>
-      ?��?載入資�?
+      無法載入資料
     </div>
   );
 
   const score      = data.score;
   const candles    = data.candles ?? [];
   const indicators = data.indicators ?? {};
-  const afterHours = data.afterHours ?? { bullStrategies: [], bearStrategies: [], bullScore: 0, bearScore: 0 };
 
-  // ?�?� S5: 60-day bull/bear chart data ?�?�
   const sliced    = candles.slice(-period);
   const closes    = sliced.map((c: any) => c.close);
   const volumes   = sliced.map((c: any) => c.volume ?? 0);
@@ -72,14 +68,14 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
     };
   });
 
- const DIMENSIONS = [
-  { key: 'trend',     label: '趨勢' },
-  { key: 'momentum',  label: '動能' },
-  { key: 'volume',    label: '量能' },
-  { key: 'chips',     label: '籌碼' },
-  { key: 'pattern',   label: '型態' },
-  { key: 'sentiment', label: '情緒' },
-];
+  const DIMENSIONS = [
+    { key: 'trend',     label: '趨勢' },
+    { key: 'momentum',  label: '動能' },
+    { key: 'volume',    label: '量能' },
+    { key: 'chips',     label: '籌碼' },
+    { key: 'pattern',   label: '型態' },
+    { key: 'sentiment', label: '情緒' },
+  ];
 
   const readingColor =
     score?.overall >= 75 ? DN_COLOR :
@@ -103,12 +99,12 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
                 {score.technicalReading}
               </span>
               <span style={{ fontSize: 11, color: '#8B8FA8', alignSelf: 'center' }}>
-                綜�?評�? {score.overall}/100
+                綜合評分 {score.overall}/100
               </span>
             </div>
           </>
         ) : (
-          <div style={{ color: '#8B8FA8', fontSize: 13, padding: 24 }}>?�無評�?資�?</div>
+          <div style={{ color: '#8B8FA8', fontSize: 13, padding: 24 }}>暫無評分資料</div>
         )}
       </div>
 
@@ -154,10 +150,11 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
 
       {/* S3: Trend strength chart */}
       <div style={{ background: '#0F1117', border: `1px solid ${BORDER}`, borderRadius: 8, padding: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 8 }}>趨勢?��?</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 8 }}>趨勢強度</div>
         <TrendStrengthChart signals={[]} isLoading={false} />
         <div style={{ fontSize: 11, color: '#8B8FA8', textAlign: 'center', marginTop: 6 }}>
-          ?�中訊�?將於?�盤後顯�?        </div>
+          盤中訊號將於收盤後顯示
+        </div>
       </div>
 
       {/* S5: 60-day bull/bear chart */}
@@ -172,7 +169,8 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
                 background: period === p ? `${DN_COLOR}22` : 'transparent',
                 color: period === p ? DN_COLOR : '#8B8FA8',
               }}>
-                {p}�?              </button>
+                {p}日
+              </button>
             ))}
           </div>
         </div>
