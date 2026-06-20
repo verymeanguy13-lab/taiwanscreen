@@ -50,12 +50,15 @@ export async function GET(req: NextRequest) {
        JOIN stocks s ON s.symbol = sr.symbol
        LEFT JOIN daily_prices dp
          ON dp.symbol = sr.symbol
-         AND dp.date = $1
+         AND dp.date = (
+           SELECT MAX(date) FROM daily_prices WHERE symbol = sr.symbol
+         )
        LEFT JOIN daily_prices dp_prev
          ON dp_prev.symbol = sr.symbol
          AND dp_prev.date = (
            SELECT MAX(date) FROM daily_prices
-           WHERE symbol = sr.symbol AND date < $1
+           WHERE symbol = sr.symbol
+           AND date < (SELECT MAX(date) FROM daily_prices WHERE symbol = sr.symbol)
          )
        WHERE sr.signal_date = $1
        AND sr.confidence >= 50
@@ -95,7 +98,7 @@ export async function GET(req: NextRequest) {
     }
 
     const results = filtered.map(r => {
-      const close     = Number(r.close)     || Number(r.entry_price) || 0;
+      const close     = Number(r.close)      || Number(r.entry_price) || 0;
       const prevClose = Number(r.prev_close) || 0;
       const changePercent = prevClose > 0
         ? Math.round(((close - prevClose) / prevClose) * 10000) / 100
