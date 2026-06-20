@@ -61,7 +61,7 @@ function marginColor(v: number | undefined | null): string {
 }
 
 // ── Client component ──────────────────────────────────────────────────────────
-export default function StockClient() {
+export default function StockClient({ initialData }: { initialData?: any }) {
   const { symbol } = useParams<{ symbol: string }>();
   const [activeTab, setActiveTab] = useState('fundamentals');
 
@@ -74,6 +74,7 @@ export default function StockClient() {
   const { data: res, isLoading, error } = useSWR(
     symbol ? `/api/stock/${symbol}` : null,
     fetcher,
+    { fallbackData: initialData },
   );
 
   // Live quote — refreshes every 15 seconds

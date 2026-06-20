@@ -1,7 +1,5 @@
-// Server component — no 'use client' here.
-// Fetches stock name from DB to build dynamic SEO title per stock.
-
-import { query } from '@/lib/db';
+// Server component — fetches initial data for SSR + SEO
+import { query, queryUnsafe } from '@/lib/db';
 import StockClient from './StockClient';
 
 interface StockMeta {
@@ -9,10 +7,8 @@ interface StockMeta {
   name_en: string | null;
 }
 
-// Next.js 16: params must be typed as Promise and awaited
 export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
-
   let rows: StockMeta[] = [];
   try {
     rows = await query<StockMeta>`
@@ -24,17 +20,14 @@ export async function generateMetadata({ params }: { params: Promise<{ symbol: s
   } catch {
     // DB error — return fallback title
   }
-
   const stock = rows[0];
-
   if (!stock) {
     return { title: `${symbol} | 台股雷達` };
   }
-
   const { name_zh, name_en } = stock;
-
   return {
-    title: `${symbol} ${name_zh} 股價分析 籌碼 殖利率 | 台股雷達`,
+    title: `${symbol} ${name_zh} 股價 籌碼 技術分析 | 台股雷達`,
+    description: `${symbol} ${name_zh} 即時股價、技術分析、籌碼分析、法人買賣、健康評分。免費台股分析工具。`,
     alternates: {
       languages: {
         en: {
@@ -45,6 +38,21 @@ export async function generateMetadata({ params }: { params: Promise<{ symbol: s
   };
 }
 
-export default function StockPage() {
-  return <StockClient />;
+export default async function StockPage({ params }: { params: Promise<{ symbol: string }> }) {
+  const { symbol } = await params;
+
+  let initialData = null;
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://taiwanscreen.vercel.app';
+    const res = await fetch(`${baseUrl}/api/stock/${symbol}`, {
+      next: { revalidate: 300 }, // cache 5 minutes
+    });
+    if (res.ok) {
+      initialData = await res.json();
+    }
+  } catch {
+    // fall through — client will fetch on mount
+  }
+
+  return <StockClient initialData={initialData} />;
 }
