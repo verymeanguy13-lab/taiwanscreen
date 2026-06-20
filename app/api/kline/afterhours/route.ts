@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     }>(
       `SELECT symbol, date, open, high, low, close, volume
        FROM daily_prices
-       WHERE date >= CURRENT_DATE - INTERVAL '60 days'
+       WHERE date >= CURRENT_DATE - INTERVAL '90 days'
        ORDER BY symbol, date ASC`,
       [],
     );
