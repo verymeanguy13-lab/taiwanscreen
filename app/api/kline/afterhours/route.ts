@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
 
         const { overall, technicalReading, dimensions } = computeScore(candles);
 
-        const isBull = overall >= 60;
+        const isBull = overall >= 55;
         const isBear = overall < 40;
         if (side === 'bull' && !isBull) continue;
         if (side === 'bear' && !isBear) continue;
