@@ -1,33 +1,61 @@
-// =============================================================================
-// app/sitemap.ts
-// Fully static — no DB calls at build time to prevent timeout
-// =============================================================================
+import { queryUnsafe } from '@/lib/db';
 
-import { MetadataRoute } from 'next';
+export default async function sitemap() {
+  const baseUrl = 'https://taiwanscreen.vercel.app';
 
-const BASE_URL = 'https://taiwanscreen.vercel.app';
+  // Fetch all stock symbols
+  const stocks = await queryUnsafe<{ symbol: string }>(
+    `SELECT symbol FROM stocks ORDER BY symbol ASC`,
+    [],
+  );
 
-const STATIC_ROUTES = [
-  '',
-  '/screener',
-  '/heatmap',
-  '/institutional',
-  
-  '/margin',
-  '/etf',
-  '/dividend',
-  '/supply-chain',
-  '/backtest',
-  '/accuracy',
-  '/rankings',
-  '/dazhang',
-];
+  const stockUrls = stocks.flatMap(({ symbol }) => [
+    {
+      url: `${baseUrl}/zh/stock/${symbol}`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.8,
+    },
+    {
+      url: `${baseUrl}/en/stock/${symbol}`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.7,
+    },
+  ]);
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  return STATIC_ROUTES.map(route => ({
-    url:             `${BASE_URL}${route}`,
-    lastModified:    new Date(),
-    changeFrequency: 'daily',
-    priority:        route === '' ? 1.0 : 0.8,
-  }));
+  const staticUrls = [
+    {
+      url: `${baseUrl}/zh`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 1.0,
+    },
+    {
+      url: `${baseUrl}/zh/screener`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/zh/dazhang`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/zh/heatmap`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/zh/dividend`,
+      lastModified: new Date(),
+      changeFrequency: 'weekly' as const,
+      priority: 0.6,
+    },
+  ];
+
+  return [...staticUrls, ...stockUrls];
 }
