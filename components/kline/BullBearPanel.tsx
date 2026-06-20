@@ -72,14 +72,14 @@ export function BullBearPanel({ symbol }: { symbol: string }) {
     };
   });
 
-  const DIMENSIONS = [
-    { key: 'trend',     label: '趨勢' },
-    { key: 'momentum',  label: '?�能' },
-    { key: 'volume',    label: '?�能' },
-    { key: 'chips',     label: '籌碼' },
-    { key: 'pattern',   label: '?��?' },
-    { key: 'sentiment', label: '?��?' },
-  ];
+ const DIMENSIONS = [
+  { key: 'trend',     label: '趨勢' },
+  { key: 'momentum',  label: '動能' },
+  { key: 'volume',    label: '量能' },
+  { key: 'chips',     label: '籌碼' },
+  { key: 'pattern',   label: '型態' },
+  { key: 'sentiment', label: '情緒' },
+];
 
   const readingColor =
     score?.overall >= 75 ? DN_COLOR :
