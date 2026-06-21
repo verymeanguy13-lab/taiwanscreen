@@ -218,7 +218,6 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
     const today = new Date();
     const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
 
-    // Use rwd endpoint — more reliable column layout
     const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${dateStr}&selectType=ALLBUT0999`;
 
     const res = await fetch(url, {
@@ -235,27 +234,6 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
       console.error('[fetchInstitutionalFlows] No data or bad stat:', json?.stat);
       return [];
     }
-
-    // rwd/T86 column order (ALLBUT0999):
-    // [0]  證券代號
-    // [1]  證券名稱
-    // [2]  外陸資買進(不含外資自營商)
-    // [3]  外陸資賣出(不含外資自營商)
-    // [4]  外陸資買賣超(不含外資自營商)
-    // [5]  外資自營商買進
-    // [6]  外資自營商賣出
-    // [7]  外資自營商買賣超
-    // [8]  投信買進
-    // [9]  投信賣出
-    // [10] 投信買賣超
-    // [11] 自營商買賣超(合計)
-    // [12] 自營商買進(自行買賣)
-    // [13] 自營商賣出(自行買賣)
-    // [14] 自營商買賣超(自行買賣)
-    // [15] 自營商買進(避險)
-    // [16] 自營商賣出(避險)
-    // [17] 自營商買賣超(避險)
-    // [18] 三大法人買賣超合計
 
     const results: RawInstitutionalFlow[] = [];
 
@@ -377,7 +355,14 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
 
 export async function fetchETFPrices(): Promise<RawETFData[]> {
   try {
-    type TWSEETFDay = { '基金代號': string; '基金名稱': string; '淨值': string; '收盤價': string; '成交量': string; '漲跌幅': string };
+    type TWSEETFDay = {
+      '基金代號': string;
+      '基金名稱': string;
+      '淨值':     string;
+      '收盤價':   string;
+      '成交量':   string;
+      '漲跌幅':   string;
+    };
     const rows = await twseFetch<TWSEETFDay>('/v1/ETF/DAY_TRADING');
     return rows
       .filter(r => r['基金代號'])
@@ -428,7 +413,16 @@ export async function fetchHistoricalPrices(symbol: string, yyyymm: string): Pro
         const change_amt = changeRaw.startsWith('+') || changeRaw.startsWith('-') ? parseFloat(changeRaw) || 0 : 0;
         const change_pct = prevClose && prevClose !== 0 ? Math.round((change_amt / prevClose) * 10000) / 100 : 0;
         prevClose = close;
-        if (close > 0) results.push({ date: dateStr, open: parseNum(row[3]), high: parseNum(row[4]), low: parseNum(row[5]), close, volume: parseNum(row[1]), change_amt, change_pct });
+        if (close > 0) results.push({
+          date: dateStr,
+          open: parseNum(row[3]),
+          high: parseNum(row[4]),
+          low:  parseNum(row[5]),
+          close,
+          volume:     parseNum(row[1]),
+          change_amt,
+          change_pct,
+        });
       } catch { /* skip */ }
     }
     return results;
@@ -449,10 +443,10 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
     };
 
     type PBX = {
-      '證券代號': string;
-      '本益比':   string;
+      '證券代號':   string;
+      '本益比':     string;
       '股價淨值比': string;
-      '殖利率':   string;
+      '殖利率':     string;
     };
 
     const [bwiRows, pbxRows] = await Promise.all([
@@ -464,6 +458,7 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
 
     const map = new Map<string, RawFundamentals>();
 
+    // TPEx stocks from PBX
     for (const r of pbxRows) {
       const symbol = r['證券代號']?.trim();
       if (!symbol) continue;
@@ -475,6 +470,7 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
       });
     }
 
+    // TWSE stocks from BWIBBU_ALL — now uses English field names
     for (const r of bwiRows) {
       const symbol = r.Code?.trim();
       if (!symbol) continue;
@@ -484,26 +480,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
         pe_ratio:       parseNumNullable(r.PEratio)       ?? existing?.pe_ratio       ?? null,
         pb_ratio:       parseNumNullable(r.PBratio)       ?? existing?.pb_ratio       ?? null,
         dividend_yield: parseNumNullable(r.DividendYield) ?? existing?.dividend_yield ?? null,
-      });
-    }
-
-    console.log(`[fetchFundamentals] Combined: ${map.size} unique symbols`);
-    return Array.from(map.values());
-  } catch (err) {
-    console.error('[fetchFundamentals] Unexpected error:', err);
-    return [];
-  }
-}
-
-    for (const r of bwiRows) {
-      const symbol = r.Code?.trim();
-      if (!symbol) continue;
-      const existing = map.get(symbol);
-      map.set(symbol, {
-        symbol,
-        pe_ratio:       parseNumNullable(r['本益比'])       ?? existing?.pe_ratio       ?? null,
-        pb_ratio:       parseNumNullable(r['股價淨值比'])   ?? existing?.pb_ratio       ?? null,
-        dividend_yield: parseNumNullable(r['殖利率(%)'])    ?? existing?.dividend_yield ?? null,
       });
     }
 
