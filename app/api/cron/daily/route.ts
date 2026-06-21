@@ -15,6 +15,7 @@ import {
   ingestDailyPrices,
   ingestInstitutionalFlows,
   ingestMarginData,
+  ingestFundamentals,
 } from '@/lib/ingest';
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -186,7 +187,22 @@ export async function GET(req: NextRequest) {
     }
   })();
 
-  allErrors.push(...stocks.errors, ...prices.errors, ...institutional.errors, ...margin.errors);
+  const fundamentals = await (async () => {
+    try { return await ingestFundamentals(); }
+    catch (err) {
+      const msg = `ingestFundamentals fatal: ${err}`;
+      console.error(msg); allErrors.push(msg);
+      return { count: 0, errors: [msg] };
+    }
+  })();
+
+  allErrors.push(
+    ...stocks.errors,
+    ...prices.errors,
+    ...institutional.errors,
+    ...margin.errors,
+    ...fundamentals.errors,
+  );
 
   // Trigger alert checks
   await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/cron/alerts`, {
@@ -218,6 +234,7 @@ export async function GET(req: NextRequest) {
       prices:        { count: prices.count },
       institutional: { count: institutional.count },
       margin:        { count: margin.count },
+      fundamentals:  { count: fundamentals.count },
       backfill:      backfillResults,
     },
     errors: allErrors,
