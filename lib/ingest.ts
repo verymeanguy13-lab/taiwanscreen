@@ -1,103 +1,394 @@
-// ============================================================
-// ADD THIS FUNCTION TO lib/ingest.ts
-// Also add these imports at the top of ingest.ts if not already present:
-//   import { fetchBalanceSheet, fetchBookValue, getLatestCompletedSeason } from './mops';
-// ============================================================
+// =============================================================================
+// lib/ingest.ts — TWSE data ingestion pipeline
+// =============================================================================
+
+import { queryUnsafe } from '@/lib/db';
+import {
+  fetchStockList,
+  fetchAllStockPrices,
+  fetchInstitutionalFlows,
+  fetchMarginData,
+  fetchFundamentals,
+} from '@/lib/twse';
+import { fetchBalanceSheet, fetchBookValue } from '@/lib/mops';
+
+type IngestResult = { count: number; errors: string[] };
+
+export async function ingestStockList(): Promise<IngestResult> {
+  console.log('[ingestStockList] Fetching stock list from TWSE…');
+  const errors: string[] = [];
+  let count = 0;
+
+  const stocks = await fetchStockList();
+  console.log(`[ingestStockList] Fetched ${stocks.length} stocks.`);
+
+  for (const stock of stocks) {
+    try {
+      await queryUnsafe(
+        `INSERT INTO stocks (symbol, name_zh, sector, market)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol) DO UPDATE
+           SET name_zh = EXCLUDED.name_zh,
+               sector  = EXCLUDED.sector,
+               market  = EXCLUDED.market`,
+        [stock.symbol, stock.name_zh, stock.sector ?? null, stock.market],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestStockList] Failed to upsert ${stock.symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  console.log(`[ingestStockList] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+export async function ingestDailyPrices(date: string): Promise<IngestResult> {
+  console.log(`[ingestDailyPrices] Fetching prices for ${date}…`);
+  const errors: string[] = [];
+  let count = 0;
+
+  const prices = await fetchAllStockPrices();
+  console.log(`[ingestDailyPrices] Fetched ${prices.length} price records.`);
+
+  for (const p of prices) {
+    try {
+      await queryUnsafe(
+        `INSERT INTO daily_prices
+           (symbol, date, open, high, low, close, volume, change_amt, change_pct)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (symbol, date) DO UPDATE
+           SET open       = EXCLUDED.open,
+               high       = EXCLUDED.high,
+               low        = EXCLUDED.low,
+               close      = EXCLUDED.close,
+               volume     = EXCLUDED.volume,
+               change_amt = EXCLUDED.change_amt,
+               change_pct = EXCLUDED.change_pct`,
+        [p.symbol, date, p.open, p.high, p.low, p.close, p.volume, p.change_amt, p.change_pct],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestDailyPrices] Failed to upsert ${p.symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  console.log(`[ingestDailyPrices] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+export async function ingestInstitutionalFlows(date: string): Promise<IngestResult> {
+  console.log(`[ingestInstitutionalFlows] Fetching institutional flows for ${date}…`);
+  const errors: string[] = [];
+  let count = 0;
+
+  const flows = await fetchInstitutionalFlows();
+  console.log(`[ingestInstitutionalFlows] Fetched ${flows.length} records.`);
+
+  for (const f of flows) {
+    try {
+      await queryUnsafe(
+        `INSERT INTO institutional_flows
+           (symbol, date,
+            foreign_buy, foreign_sell, foreign_net,
+            trust_buy, trust_sell, trust_net,
+            dealer_buy, dealer_sell, dealer_net,
+            total_net)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (symbol, date) DO UPDATE
+           SET foreign_buy  = EXCLUDED.foreign_buy,
+               foreign_sell = EXCLUDED.foreign_sell,
+               foreign_net  = EXCLUDED.foreign_net,
+               trust_buy    = EXCLUDED.trust_buy,
+               trust_sell   = EXCLUDED.trust_sell,
+               trust_net    = EXCLUDED.trust_net,
+               dealer_buy   = EXCLUDED.dealer_buy,
+               dealer_sell  = EXCLUDED.dealer_sell,
+               dealer_net   = EXCLUDED.dealer_net,
+               total_net    = EXCLUDED.total_net`,
+        [
+          f.symbol, date,
+          f.foreign_buy, f.foreign_sell, f.foreign_net,
+          f.trust_buy,   f.trust_sell,   f.trust_net,
+          f.dealer_buy,  f.dealer_sell,  f.dealer_net,
+          f.total_net,
+        ],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestInstitutionalFlows] Failed to upsert ${f.symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  try {
+    await queryUnsafe(
+      `UPDATE institutional_flows
+       SET triple_buy = (foreign_net > 0 AND trust_net > 0 AND dealer_net > 0)
+       WHERE date = $1`,
+      [date],
+    );
+  } catch (err) {
+    const msg = `[ingestInstitutionalFlows] Failed to compute triple_buy: ${err}`;
+    console.error(msg);
+    errors.push(msg);
+  }
+
+  await computeConsecutiveDays(date);
+
+  console.log(`[ingestInstitutionalFlows] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+export async function computeConsecutiveDays(date: string): Promise<void> {
+  console.log(`[computeConsecutiveDays] Starting for date ${date}…`);
+
+  try {
+    const symbols = await queryUnsafe<{ symbol: string }>(
+      `SELECT DISTINCT symbol FROM institutional_flows WHERE date = $1`,
+      [date],
+    );
+
+    for (const { symbol } of symbols) {
+      try {
+        const rows = await queryUnsafe<{
+          date: string;
+          foreign_net: number;
+          trust_net: number;
+        }>(
+          `SELECT date, foreign_net, trust_net
+           FROM institutional_flows
+           WHERE symbol = $1 AND date <= $2
+           ORDER BY date DESC LIMIT 60`,
+          [symbol, date],
+        );
+
+        if (rows.length === 0) continue;
+
+        let foreignStreak = 0;
+        const firstForeignPositive = (rows[0].foreign_net ?? 0) > 0;
+        for (const row of rows) {
+          const positive = (row.foreign_net ?? 0) > 0;
+          if (positive === firstForeignPositive) foreignStreak += firstForeignPositive ? 1 : -1;
+          else break;
+        }
+
+        let trustStreak = 0;
+        const firstTrustPositive = (rows[0].trust_net ?? 0) > 0;
+        for (const row of rows) {
+          const positive = (row.trust_net ?? 0) > 0;
+          if (positive === firstTrustPositive) trustStreak += firstTrustPositive ? 1 : -1;
+          else break;
+        }
+
+        await queryUnsafe(
+          `UPDATE institutional_flows
+           SET foreign_consecutive_days = $1,
+               trust_consecutive_days   = $2
+           WHERE symbol = $3 AND date = $4`,
+          [foreignStreak, trustStreak, symbol, date],
+        );
+      } catch (err) {
+        console.error(`[computeConsecutiveDays] Failed for ${symbol}: ${err}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[computeConsecutiveDays] Fatal error: ${err}`);
+  }
+}
+
+export async function ingestMarginData(date: string): Promise<IngestResult> {
+  console.log(`[ingestMarginData] Fetching margin data for ${date}…`);
+  const errors: string[] = [];
+  let count = 0;
+
+  const records = await fetchMarginData();
+  console.log(`[ingestMarginData] Fetched ${records.length} records.`);
+
+  for (const m of records) {
+    try {
+      const margin_ratio =
+        m.margin_balance + m.short_balance > 0
+          ? (m.margin_balance / (m.margin_balance + m.short_balance)) * 100
+          : 0;
+
+      await queryUnsafe(
+        `INSERT INTO margin_data
+           (symbol, date, margin_balance, margin_change,
+            short_balance, short_change, margin_ratio)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (symbol, date) DO UPDATE
+           SET margin_balance = EXCLUDED.margin_balance,
+               margin_change  = EXCLUDED.margin_change,
+               short_balance  = EXCLUDED.short_balance,
+               short_change   = EXCLUDED.short_change,
+               margin_ratio   = EXCLUDED.margin_ratio`,
+        [
+          m.symbol, date,
+          m.margin_balance, m.margin_change,
+          m.short_balance,  m.short_change,
+          Math.round(margin_ratio * 100) / 100,
+        ],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestMarginData] Failed to upsert ${m.symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  console.log(`[ingestMarginData] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+export async function ingestFundamentals(): Promise<IngestResult> {
+  console.log('[ingestFundamentals] Fetching fundamentals from TWSE…');
+  const errors: string[] = [];
+  let count = 0;
+
+  const records = await fetchFundamentals();
+  console.log(`[ingestFundamentals] Fetched ${records.length} records.`);
+
+  if (records.length === 0) {
+    return { count: 0, errors: ['No fundamentals data returned from TWSE'] };
+  }
+
+  const now     = new Date();
+  const year    = now.getFullYear();
+  const quarter = Math.ceil((now.getMonth() + 1) / 3);
+  const period  = `${year}Q${quarter}`;
+
+  for (const f of records) {
+    try {
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, pe_ratio, pb_ratio)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET pe_ratio = EXCLUDED.pe_ratio,
+               pb_ratio = EXCLUDED.pb_ratio`,
+        [f.symbol, period, f.pe_ratio, f.pb_ratio],
+      );
+      count++;
+
+      if (f.dividend_yield !== null) {
+        await queryUnsafe(
+          `INSERT INTO dividend_summary (symbol, latest_yield_pct)
+           VALUES ($1, $2)
+           ON CONFLICT (symbol) DO UPDATE
+             SET latest_yield_pct = EXCLUDED.latest_yield_pct`,
+          [f.symbol, f.dividend_yield],
+        );
+      }
+    } catch (err) {
+      const msg = String(err);
+      if (!msg.includes('foreign key') && !msg.includes('violates')) {
+        errors.push(`[ingestFundamentals] Failed ${f.symbol}: ${msg}`);
+      }
+    }
+  }
+
+  console.log(`[ingestFundamentals] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+// =============================================================================
+// ingestFundamentalsBalanceSheet — fetches debt_ratio + pb_ratio from MOPS
+// =============================================================================
 
 /**
  * Fetches balance sheet data and book value from MOPS, then upserts
  * debt_ratio and pb_ratio into the fundamentals table.
  *
- * pb_ratio is computed as: latest_close_price / book_value_per_share
- * debt_ratio is computed as: total_liabilities / total_assets × 100
+ * debt_ratio = total_liabilities / total_assets × 100
+ * pb_ratio   = latest_close_price / book_value_per_share
  *
- * The `period` key in fundamentals matches MOPS season format: "2025Q1", "2024Q4", etc.
+ * Run quarterly via /api/cron/fundamentals, or trigger once manually via
+ * /api/admin/backfill-fundamentals to seed all historical NULL rows.
  */
 export async function ingestFundamentalsBalanceSheet(
   year: number,
-  season: number
-): Promise<{ count: number; errors: string[] }> {
+  season: number,
+): Promise<IngestResult> {
   const errors: string[] = [];
   let count = 0;
   const period = `${year}Q${season}`;
 
-  console.log(`[ingest] fetchBalanceSheet ${period}...`);
+  console.log(`[ingestFundamentalsBalanceSheet] fetchBalanceSheet ${period}…`);
   const balanceSheets = await fetchBalanceSheet(year, season);
   if (balanceSheets.length === 0) {
     errors.push(`fetchBalanceSheet returned 0 rows for ${period}`);
   }
 
-  console.log(`[ingest] fetchBookValue ${period}...`);
+  console.log(`[ingestFundamentalsBalanceSheet] fetchBookValue ${period}…`);
   const bookValues = await fetchBookValue(year, season);
   if (bookValues.length === 0) {
     errors.push(`fetchBookValue returned 0 rows for ${period}`);
   }
 
-  // Build lookup maps
   const debtMap = new Map(balanceSheets.map(r => [r.symbol, r.debtRatio]));
   const bookMap = new Map(bookValues.map(r => [r.symbol, r.bookValuePerShare]));
-
-  // Get all symbols that appear in either dataset
   const allSymbols = new Set([...debtMap.keys(), ...bookMap.keys()]);
+
   if (allSymbols.size === 0) {
     return { count: 0, errors };
   }
 
-  // Fetch latest close prices for pb_ratio calculation
-  // We do this in one query rather than N queries
-  console.log(`[ingest] fetching latest prices for pb_ratio...`);
+  // Fetch latest close prices in one query for pb_ratio calculation
+  console.log(`[ingestFundamentalsBalanceSheet] Fetching latest prices…`);
   let latestPrices: Map<string, number> = new Map();
   try {
     const priceRows = await queryUnsafe<{ symbol: string; close: number }>(
       `SELECT DISTINCT ON (symbol) symbol, close
        FROM daily_prices
        WHERE close IS NOT NULL AND close > 0
-       ORDER BY symbol, date DESC`
+       ORDER BY symbol, date DESC`,
     );
     latestPrices = new Map(priceRows.map(r => [r.symbol, Number(r.close)]));
   } catch (e) {
     errors.push(`Failed to fetch latest prices: ${e}`);
   }
 
-  console.log(`[ingest] upserting fundamentals for ${allSymbols.size} stocks...`);
+  console.log(`[ingestFundamentalsBalanceSheet] Upserting ${allSymbols.size} stocks…`);
 
-  // Upsert in batches of 100 to avoid parameter limits
-  const symbols = Array.from(allSymbols);
-  const BATCH = 100;
+  let i = 0;
+  for (const symbol of allSymbols) {
+    const debtRatio  = debtMap.get(symbol) ?? null;
+    const bookValue  = bookMap.get(symbol) ?? null;
+    const latestClose = latestPrices.get(symbol) ?? null;
 
-  for (let i = 0; i < symbols.length; i += BATCH) {
-    const batch = symbols.slice(i, i + BATCH);
+    const pbRatio =
+      bookValue !== null && latestClose !== null && bookValue > 0
+        ? parseFloat((latestClose / bookValue).toFixed(2))
+        : null;
 
-    for (const symbol of batch) {
-      const debtRatio = debtMap.get(symbol) ?? null;
-      const bookValue = bookMap.get(symbol) ?? null;
-      const latestClose = latestPrices.get(symbol) ?? null;
-
-      const pbRatio =
-        bookValue !== null && latestClose !== null && bookValue > 0
-          ? parseFloat((latestClose / bookValue).toFixed(2))
-          : null;
-
-      try {
-        await queryUnsafe(
-          `INSERT INTO fundamentals (symbol, period, debt_ratio, pb_ratio)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (symbol, period) DO UPDATE SET
-             debt_ratio = COALESCE($3, fundamentals.debt_ratio),
-             pb_ratio   = COALESCE($4, fundamentals.pb_ratio)`,
-          [symbol, period, debtRatio, pbRatio]
-        );
-        count++;
-      } catch (e) {
-        errors.push(`${symbol}: ${e}`);
-      }
+    try {
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, debt_ratio, pb_ratio)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET debt_ratio = COALESCE($3, fundamentals.debt_ratio),
+               pb_ratio   = COALESCE($4, fundamentals.pb_ratio)`,
+        [symbol, period, debtRatio, pbRatio],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestFundamentalsBalanceSheet] Failed ${symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
     }
 
+    i++;
     if (i % 500 === 0) {
-      console.log(`[ingest] progress: ${i}/${symbols.length}`);
+      console.log(`[ingestFundamentalsBalanceSheet] Progress: ${i}/${allSymbols.size}`);
     }
   }
 
-  console.log(`[ingest] ingestFundamentalsBalanceSheet done: ${count} rows, ${errors.length} errors`);
+  console.log(`[ingestFundamentalsBalanceSheet] Done. ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
