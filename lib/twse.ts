@@ -441,10 +441,11 @@ export async function fetchHistoricalPrices(symbol: string, yyyymm: string): Pro
 export async function fetchFundamentals(): Promise<RawFundamentals[]> {
   try {
     type BWIBBU = {
-      Code:         string;
-      '殖利率(%)':  string;
-      '本益比':     string;
-      '股價淨值比': string;
+      Code:          string;
+      Name:          string;
+      PEratio:       string;
+      DividendYield: string;
+      PBratio:       string;
     };
 
     type PBX = {
@@ -473,6 +474,26 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
         dividend_yield: parseNumNullable(r['殖利率']),
       });
     }
+
+    for (const r of bwiRows) {
+      const symbol = r.Code?.trim();
+      if (!symbol) continue;
+      const existing = map.get(symbol);
+      map.set(symbol, {
+        symbol,
+        pe_ratio:       parseNumNullable(r.PEratio)       ?? existing?.pe_ratio       ?? null,
+        pb_ratio:       parseNumNullable(r.PBratio)       ?? existing?.pb_ratio       ?? null,
+        dividend_yield: parseNumNullable(r.DividendYield) ?? existing?.dividend_yield ?? null,
+      });
+    }
+
+    console.log(`[fetchFundamentals] Combined: ${map.size} unique symbols`);
+    return Array.from(map.values());
+  } catch (err) {
+    console.error('[fetchFundamentals] Unexpected error:', err);
+    return [];
+  }
+}
 
     for (const r of bwiRows) {
       const symbol = r.Code?.trim();

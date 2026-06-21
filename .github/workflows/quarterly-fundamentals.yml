@@ -1,27 +1,18 @@
 # .github/workflows/quarterly-fundamentals.yml
 #
-# Runs quarterly to fetch balance sheet + book value from MOPS and populate
-# debt_ratio and pb_ratio in the fundamentals table.
-#
-# This workflow handles Vercel free plan's 10s timeout by:
-#   1. Calling /api/admin/mops-cache?type=balance_sheet  (fetches + caches in DB)
-#   2. Calling /api/admin/mops-cache?type=book_value     (fetches + caches in DB)
-#   3. Calling /api/admin/mops-apply                     (reads cache, upserts fundamentals)
-#
-# Each step is a fast single MOPS fetch that may take up to 30s —
-# curl --max-time 60 handles this; GitHub Actions has no Vercel timeout.
+# Runs quarterly — fetches balance sheet + book value from MOPS and upserts
+# debt_ratio and pb_ratio directly into Neon DB. No Vercel timeout issues.
 #
 # Schedule: 10:00 UTC on the 20th of Jan, Apr, Jul, Oct
-#   Jan 20 → Q3 of previous year
-#   Apr 20 → Q4 of previous year (safely published by now)
+#   Apr 20 → Q4 of previous year
 #   Jul 20 → Q1
 #   Oct 20 → Q2
+#   Jan 20 → Q3 of previous year
 #
-# One-time setup (do this now):
+# One-time setup:
 #   github.com/verymeanguy13-lab/taiwanscreen
 #   → Settings → Secrets and variables → Actions → New repository secret
-#   Name: CRON_SECRET   Value: mysecret123
-#   Name: APP_URL       Value: https://taiwanscreen.vercel.app
+#   Name: DATABASE_URL   Value: (your Neon connection string from .env.local)
 
 name: Quarterly Fundamentals (debt_ratio + pb_ratio)
 
@@ -43,61 +34,20 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Build query string
-        id: qs
-        run: |
-          if [ -n "${{ github.event.inputs.year }}" ] && [ -n "${{ github.event.inputs.season }}" ]; then
-            echo "qs=?year=${{ github.event.inputs.year }}&season=${{ github.event.inputs.season }}" >> $GITHUB_OUTPUT
-          else
-            echo "qs=" >> $GITHUB_OUTPUT
-          fi
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Step 1 — fetch balance sheet from MOPS → cache in DB
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: ${{ secrets.APP_URL }}
-        run: |
-          URL="${APP_URL}/api/admin/mops-cache${{ steps.qs.outputs.qs }}"
-          echo "POST $URL (type=balance_sheet)"
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 \
-            -X POST "${URL}" \
-            -H "x-cron-secret: ${CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            -d '{"type":"balance_sheet"}')
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n-1)
-          echo "HTTP $HTTP_CODE: $BODY"
-          [ "$HTTP_CODE" = "200" ] || exit 1
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Step 2 — fetch book value from MOPS → cache in DB
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: ${{ secrets.APP_URL }}
-        run: |
-          URL="${APP_URL}/api/admin/mops-cache${{ steps.qs.outputs.qs }}"
-          echo "POST $URL (type=book_value)"
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 \
-            -X POST "${URL}" \
-            -H "x-cron-secret: ${CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            -d '{"type":"book_value"}')
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n-1)
-          echo "HTTP $HTTP_CODE: $BODY"
-          [ "$HTTP_CODE" = "200" ] || exit 1
+      - name: Install dependencies
+        run: npm install @neondatabase/serverless node-fetch
 
-      - name: Step 3 — apply cached data → upsert fundamentals
+      - name: Run fundamentals ingestion
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: ${{ secrets.APP_URL }}
-        run: |
-          URL="${APP_URL}/api/admin/mops-apply${{ steps.qs.outputs.qs }}"
-          echo "POST $URL"
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 \
-            -X POST "${URL}" \
-            -H "x-cron-secret: ${CRON_SECRET}")
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n-1)
-          echo "HTTP $HTTP_CODE: $BODY"
-          [ "$HTTP_CODE" = "200" ] || exit 1
-          echo "✅ Done: $BODY"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INPUT_YEAR: ${{ github.event.inputs.year }}
+          INPUT_SEASON: ${{ github.event.inputs.season }}
+        run: node scripts/ingest-fundamentals.mjs
