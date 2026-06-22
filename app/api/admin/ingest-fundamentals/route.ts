@@ -2,7 +2,8 @@
 // app/api/admin/ingest-fundamentals/route.ts
 // POST /api/admin/ingest-fundamentals?offset=0
 // Orders by trading volume DESC so biggest stocks are processed first.
-// Now also fetches TaiwanStockBalanceSheet for debt_ratio.
+// Fetches TaiwanStockBalanceSheet for debt_ratio + ROE.
+// market_cap computed from close price x shares (CapitalStock / 10).
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -47,9 +48,8 @@ export async function POST(req: NextRequest) {
   const offset = parseInt(searchParams.get('offset') ?? '0', 10);
 
   try {
-    // Order by latest trading volume DESC — biggest stocks first
-    const stocks = await queryUnsafe<{ symbol: string }>(
-      `SELECT s.symbol
+    const stocks = await queryUnsafe<{ symbol: string; close: number | null }>(
+      `SELECT s.symbol, dp.close
        FROM stocks s
        LEFT JOIN daily_prices dp
          ON dp.symbol = s.symbol
@@ -65,17 +65,15 @@ export async function POST(req: NextRequest) {
     let count  = 0;
     let errors = 0;
 
-    await Promise.all(stocks.map(async ({ symbol }) => {
+    await Promise.all(stocks.map(async ({ symbol, close }) => {
       try {
-        // Fetch income statement + balance sheet in parallel
         const [stmtData, bsData] = await Promise.all([
           fetchFinMind('TaiwanStockFinancialStatements', symbol, startDate),
           fetchFinMind('TaiwanStockBalanceSheet', symbol, startDate),
         ]);
 
-        // ── Income statement ──────────────────────────────────────────────
+        // Income statement
         const periodMap: Record<string, Record<string, number>> = {};
-
         for (const row of stmtData) {
           const period = dateToPeriod(row.date);
           if (!periodMap[period]) periodMap[period] = {};
@@ -83,22 +81,42 @@ export async function POST(req: NextRequest) {
           if (field) periodMap[period][field] = row.value;
         }
 
-        // ── Balance sheet — compute debt_ratio per period ─────────────────
-        // Group by date first, then extract TotalAssets and Liabilities
-        const bsMap: Record<string, { totalAssets?: number; liabilities?: number }> = {};
+        // Balance sheet
+        const bsMap: Record<string, {
+          totalAssets?:  number;
+          liabilities?:  number;
+          equity?:       number;
+          capitalStock?: number;
+        }> = {};
         for (const row of bsData) {
           const period = dateToPeriod(row.date);
           if (!bsMap[period]) bsMap[period] = {};
           if (row.type === 'TotalAssets')  bsMap[period].totalAssets  = row.value;
           if (row.type === 'Liabilities')  bsMap[period].liabilities  = row.value;
+          if (row.type === 'Equity')       bsMap[period].equity       = row.value;
+          if (row.type === 'CapitalStock') bsMap[period].capitalStock = row.value;
         }
 
-        // Merge all periods from both datasets
+        // market_cap from latest CapitalStock (shares x NT$10 par) x close price
+        const sortedPeriods = Object.keys(bsMap).sort().reverse();
+        let sharesOutstanding: number | null = null;
+        for (const p of sortedPeriods) {
+          if (bsMap[p].capitalStock) {
+            sharesOutstanding = bsMap[p].capitalStock! / 10;
+            break;
+          }
+        }
+        // market_cap in 億 NTD
+        const market_cap = (close && sharesOutstanding)
+          ? Math.round(close * sharesOutstanding / 1_000_000) / 100
+          : null;
+
+        // Merge all periods
         const allPeriods = new Set([...Object.keys(periodMap), ...Object.keys(bsMap)]);
 
         for (const period of allPeriods) {
-          const fields     = periodMap[period] ?? {};
-          const bs         = bsMap[period]     ?? {};
+          const fields = periodMap[period] ?? {};
+          const bs     = bsMap[period]     ?? {};
 
           const revenue      = fields['revenue']      ?? null;
           const net_income   = fields['net_income']   ?? null;
@@ -109,23 +127,25 @@ export async function POST(req: NextRequest) {
             ? Math.round((gross_profit / revenue) * 10000) / 100 : null;
           const net_margin = (revenue && net_income && revenue !== 0)
             ? Math.round((net_income / revenue) * 10000) / 100 : null;
-
           const debt_ratio = (bs.totalAssets && bs.liabilities && bs.totalAssets > 0)
-            ? Math.round((bs.liabilities / bs.totalAssets) * 10000) / 100
-            : null;
+            ? Math.round((bs.liabilities / bs.totalAssets) * 10000) / 100 : null;
+          const roe = (net_income && bs.equity && bs.equity > 0)
+            ? Math.round((net_income / bs.equity) * 10000) / 100 : null;
 
           await queryUnsafe(
             `INSERT INTO fundamentals
-               (symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+               (symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio, roe, market_cap)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
              ON CONFLICT (symbol, period) DO UPDATE
                SET eps          = COALESCE(EXCLUDED.eps,          fundamentals.eps),
                    revenue      = COALESCE(EXCLUDED.revenue,      fundamentals.revenue),
                    net_income   = COALESCE(EXCLUDED.net_income,   fundamentals.net_income),
                    gross_margin = COALESCE(EXCLUDED.gross_margin, fundamentals.gross_margin),
                    net_margin   = COALESCE(EXCLUDED.net_margin,   fundamentals.net_margin),
-                   debt_ratio   = COALESCE(EXCLUDED.debt_ratio,   fundamentals.debt_ratio)`,
-            [symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio],
+                   debt_ratio   = COALESCE(EXCLUDED.debt_ratio,   fundamentals.debt_ratio),
+                   roe          = COALESCE(EXCLUDED.roe,          fundamentals.roe),
+                   market_cap   = COALESCE(EXCLUDED.market_cap,   fundamentals.market_cap)`,
+            [symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio, roe, market_cap],
           );
           count++;
         }
