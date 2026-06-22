@@ -2,6 +2,7 @@
 // app/api/admin/ingest-fundamentals/route.ts
 // POST /api/admin/ingest-fundamentals?offset=0
 // Orders by trading volume DESC so biggest stocks are processed first.
+// Now also fetches TaiwanStockBalanceSheet for debt_ratio.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -9,7 +10,7 @@ import { queryUnsafe } from '@/lib/db';
 
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
 
-const TYPE_MAP: Record<string, string> = {
+const STMT_TYPE_MAP: Record<string, string> = {
   'Revenue':          'revenue',
   'GrossProfit':      'gross_profit',
   'OperatingIncome':  'operating_income',
@@ -66,18 +67,39 @@ export async function POST(req: NextRequest) {
 
     await Promise.all(stocks.map(async ({ symbol }) => {
       try {
-        const stmtData = await fetchFinMind('TaiwanStockFinancialStatements', symbol, startDate);
-        if (stmtData.length === 0) return;
+        // Fetch income statement + balance sheet in parallel
+        const [stmtData, bsData] = await Promise.all([
+          fetchFinMind('TaiwanStockFinancialStatements', symbol, startDate),
+          fetchFinMind('TaiwanStockBalanceSheet', symbol, startDate),
+        ]);
 
+        // ── Income statement ──────────────────────────────────────────────
         const periodMap: Record<string, Record<string, number>> = {};
+
         for (const row of stmtData) {
           const period = dateToPeriod(row.date);
           if (!periodMap[period]) periodMap[period] = {};
-          const field = TYPE_MAP[row.type];
+          const field = STMT_TYPE_MAP[row.type];
           if (field) periodMap[period][field] = row.value;
         }
 
-        for (const [period, fields] of Object.entries(periodMap)) {
+        // ── Balance sheet — compute debt_ratio per period ─────────────────
+        // Group by date first, then extract TotalAssets and Liabilities
+        const bsMap: Record<string, { totalAssets?: number; liabilities?: number }> = {};
+        for (const row of bsData) {
+          const period = dateToPeriod(row.date);
+          if (!bsMap[period]) bsMap[period] = {};
+          if (row.type === 'TotalAssets')  bsMap[period].totalAssets  = row.value;
+          if (row.type === 'Liabilities')  bsMap[period].liabilities  = row.value;
+        }
+
+        // Merge all periods from both datasets
+        const allPeriods = new Set([...Object.keys(periodMap), ...Object.keys(bsMap)]);
+
+        for (const period of allPeriods) {
+          const fields     = periodMap[period] ?? {};
+          const bs         = bsMap[period]     ?? {};
+
           const revenue      = fields['revenue']      ?? null;
           const net_income   = fields['net_income']   ?? null;
           const eps          = fields['eps']          ?? null;
@@ -88,17 +110,22 @@ export async function POST(req: NextRequest) {
           const net_margin = (revenue && net_income && revenue !== 0)
             ? Math.round((net_income / revenue) * 10000) / 100 : null;
 
+          const debt_ratio = (bs.totalAssets && bs.liabilities && bs.totalAssets > 0)
+            ? Math.round((bs.liabilities / bs.totalAssets) * 10000) / 100
+            : null;
+
           await queryUnsafe(
             `INSERT INTO fundamentals
-               (symbol, period, eps, revenue, net_income, gross_margin, net_margin)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)
+               (symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
              ON CONFLICT (symbol, period) DO UPDATE
                SET eps          = COALESCE(EXCLUDED.eps,          fundamentals.eps),
                    revenue      = COALESCE(EXCLUDED.revenue,      fundamentals.revenue),
                    net_income   = COALESCE(EXCLUDED.net_income,   fundamentals.net_income),
                    gross_margin = COALESCE(EXCLUDED.gross_margin, fundamentals.gross_margin),
-                   net_margin   = COALESCE(EXCLUDED.net_margin,   fundamentals.net_margin)`,
-            [symbol, period, eps, revenue, net_income, gross_margin, net_margin],
+                   net_margin   = COALESCE(EXCLUDED.net_margin,   fundamentals.net_margin),
+                   debt_ratio   = COALESCE(EXCLUDED.debt_ratio,   fundamentals.debt_ratio)`,
+            [symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio],
           );
           count++;
         }
