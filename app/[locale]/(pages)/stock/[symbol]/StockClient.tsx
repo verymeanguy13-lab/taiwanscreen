@@ -117,18 +117,21 @@ export default function StockClient({ initialData }: { initialData?: any }) {
   // Use live quote if available, fall back to daily_prices
   const displayQuote = liveQuote?.close ? liveQuote : quote;
   const change = formatChange(displayQuote?.change_pct ?? 0);
+
+  // Merge all periods — newest first, first non-null value for each field wins
   const fund = fundamentals.reduce((acc, f) => ({
-  ...acc,
-  ...(f.roe         != null && { roe:         f.roe }),
-  ...(f.eps         != null && { eps:         f.eps }),
-  ...(f.gross_margin != null && { gross_margin: f.gross_margin }),
-  ...(f.net_margin  != null && { net_margin:  f.net_margin }),
-  ...(f.debt_ratio  != null && { debt_ratio:  f.debt_ratio }),
-  ...(f.pe_ratio    != null && { pe_ratio:    f.pe_ratio }),
-  ...(f.pb_ratio    != null && { pb_ratio:    f.pb_ratio }),
-  ...(f.revenue     != null && { revenue:     f.revenue }),
-  ...(f.net_income  != null && { net_income:  f.net_income }),
-}), {} as Record<string, number>);
+    ...acc,
+    ...(f.roe          != null && { roe:          f.roe }),
+    ...(f.market_cap   != null && { market_cap:   f.market_cap }),
+    ...(f.eps          != null && { eps:          f.eps }),
+    ...(f.gross_margin != null && { gross_margin: f.gross_margin }),
+    ...(f.net_margin   != null && { net_margin:   f.net_margin }),
+    ...(f.debt_ratio   != null && { debt_ratio:   f.debt_ratio }),
+    ...(f.pe_ratio     != null && { pe_ratio:     f.pe_ratio }),
+    ...(f.pb_ratio     != null && { pb_ratio:     f.pb_ratio }),
+    ...(f.revenue      != null && { revenue:      f.revenue }),
+    ...(f.net_income   != null && { net_income:   f.net_income }),
+  }), {} as Record<string, number>);
 
   const TABS = [
     { label: '基本面',   value: 'fundamentals' },

@@ -62,7 +62,10 @@ export async function GET(
                  eps IS NOT NULL OR
                  revenue IS NOT NULL OR
                  gross_margin IS NOT NULL OR
-                 pe_ratio IS NOT NULL
+                 pe_ratio IS NOT NULL OR
+                 roe IS NOT NULL OR
+                 debt_ratio IS NOT NULL OR
+                 market_cap IS NOT NULL
                )
              ORDER BY period DESC
              LIMIT 8`,
