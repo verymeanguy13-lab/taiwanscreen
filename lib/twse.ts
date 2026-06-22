@@ -44,10 +44,11 @@ export interface RawMarginData {
 }
 
 export interface RawStockInfo {
-  symbol:  string;
-  name_zh: string;
-  sector:  string;
-  market:  'TWSE' | 'TPEx';
+  symbol:             string;
+  name_zh:            string;
+  sector:             string;
+  market:             'TWSE' | 'TPEx';
+  shares_outstanding: number | null;
 }
 
 export interface RawETFData {
@@ -123,7 +124,6 @@ async function tpexFetch<T>(path: string): Promise<T[]> {
 
 export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
   try {
-    // ── TWSE prices ───────────────────────────────────────────────────────────
     type TWSEStockDay = {
       Code:          string;
       Name:          string;
@@ -159,7 +159,6 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
 
     console.log(`[fetchAllStockPrices] TWSE: ${twsePrices.length} stocks`);
 
-    // ── TPEx prices ───────────────────────────────────────────────────────────
     type TPExStockDay = {
       SecuritiesCompanyCode: string;
       CompanyName:           string;
@@ -200,7 +199,6 @@ export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
       console.error('[fetchAllStockPrices] TPEx fetch failed:', err);
     }
 
-    // Merge — TWSE takes priority if same symbol appears in both
     const merged = new Map<string, RawStockPrice>();
     for (const p of tpexPrices) merged.set(p.symbol, p);
     for (const p of twsePrices) merged.set(p.symbol, p);
@@ -309,16 +307,22 @@ export async function fetchMarginData(): Promise<RawMarginData[]> {
 
 export async function fetchStockList(): Promise<RawStockInfo[]> {
   try {
-    type TWSEStockInfo = { '公司代號': string; '公司簡稱': string; '產業類別': string };
+    type TWSEStockInfo = {
+      '公司代號': string;
+      '公司簡稱': string;
+      '產業類別': string;
+      '已發行普通股數或TDR原股發行股數': string;
+    };
 
     const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
     const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
       .map(r => ({
-        symbol:  r['公司代號'].trim(),
-        name_zh: r['公司簡稱']?.trim() ?? '',
-        sector:  r['產業類別']?.trim() ?? '',
-        market:  'TWSE' as const,
+        symbol:             r['公司代號'].trim(),
+        name_zh:            r['公司簡稱']?.trim() ?? '',
+        sector:             r['產業類別']?.trim() ?? '',
+        market:             'TWSE' as const,
+        shares_outstanding: parseInt(r['已發行普通股數或TDR原股發行股數']?.replace(/,/g, '') ?? '0', 10) || null,
       }));
 
     let tpexStocks: RawStockInfo[] = [];
@@ -336,7 +340,7 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
           const name_zh = match[2].trim();
           const sector  = match[3].trim();
           if (/^\d{4}$/.test(symbol)) {
-            tpexStocks.push({ symbol, name_zh, sector, market: 'TPEx' as const });
+            tpexStocks.push({ symbol, name_zh, sector, market: 'TPEx' as const, shares_outstanding: null });
           }
         }
         console.log(`[fetchStockList] TPEx: ${tpexStocks.length} stocks`);
@@ -458,7 +462,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
 
     const map = new Map<string, RawFundamentals>();
 
-    // TPEx stocks from PBX
     for (const r of pbxRows) {
       const symbol = r['證券代號']?.trim();
       if (!symbol) continue;
@@ -470,7 +473,6 @@ export async function fetchFundamentals(): Promise<RawFundamentals[]> {
       });
     }
 
-    // TWSE stocks from BWIBBU_ALL — now uses English field names
     for (const r of bwiRows) {
       const symbol = r.Code?.trim();
       if (!symbol) continue;

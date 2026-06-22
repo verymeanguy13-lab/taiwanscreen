@@ -25,13 +25,14 @@ export async function ingestStockList(): Promise<IngestResult> {
   for (const stock of stocks) {
     try {
       await queryUnsafe(
-        `INSERT INTO stocks (symbol, name_zh, sector, market)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO stocks (symbol, name_zh, sector, market, shares_outstanding)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (symbol) DO UPDATE
-           SET name_zh = EXCLUDED.name_zh,
-               sector  = EXCLUDED.sector,
-               market  = EXCLUDED.market`,
-        [stock.symbol, stock.name_zh, stock.sector ?? null, stock.market],
+           SET name_zh            = EXCLUDED.name_zh,
+               sector             = EXCLUDED.sector,
+               market             = EXCLUDED.market,
+               shares_outstanding = COALESCE(EXCLUDED.shares_outstanding, stocks.shares_outstanding)`,
+        [stock.symbol, stock.name_zh, stock.sector ?? null, stock.market, stock.shares_outstanding ?? null],
       );
       count++;
     } catch (err) {
@@ -301,16 +302,6 @@ export async function ingestFundamentals(): Promise<IngestResult> {
 // ingestFundamentalsBalanceSheet — fetches debt_ratio + pb_ratio from MOPS
 // =============================================================================
 
-/**
- * Fetches balance sheet data and book value from MOPS, then upserts
- * debt_ratio and pb_ratio into the fundamentals table.
- *
- * debt_ratio = total_liabilities / total_assets × 100
- * pb_ratio   = latest_close_price / book_value_per_share
- *
- * Run quarterly via /api/cron/fundamentals, or trigger once manually via
- * /api/admin/backfill-fundamentals to seed all historical NULL rows.
- */
 export async function ingestFundamentalsBalanceSheet(
   year: number,
   season: number,
@@ -339,7 +330,6 @@ export async function ingestFundamentalsBalanceSheet(
     return { count: 0, errors };
   }
 
-  // Fetch latest close prices in one query for pb_ratio calculation
   console.log(`[ingestFundamentalsBalanceSheet] Fetching latest prices…`);
   let latestPrices: Map<string, number> = new Map();
   try {
@@ -358,8 +348,8 @@ export async function ingestFundamentalsBalanceSheet(
 
   let i = 0;
   for (const symbol of allSymbols) {
-    const debtRatio  = debtMap.get(symbol) ?? null;
-    const bookValue  = bookMap.get(symbol) ?? null;
+    const debtRatio   = debtMap.get(symbol) ?? null;
+    const bookValue   = bookMap.get(symbol) ?? null;
     const latestClose = latestPrices.get(symbol) ?? null;
 
     const pbRatio =

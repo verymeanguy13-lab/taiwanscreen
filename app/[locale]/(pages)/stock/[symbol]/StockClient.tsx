@@ -133,6 +133,19 @@ export default function StockClient({ initialData }: { initialData?: any }) {
     ...(f.net_income   != null && { net_income:   f.net_income }),
   }), {} as Record<string, number>);
 
+  // Compute ROE from available data: eps × pb_ratio / close × 100
+  // (ROE = eps/book_value × 100, book_value = price/pb_ratio)
+  const computedRoe = (fund?.eps && fund?.pb_ratio && displayQuote?.close && displayQuote.close > 0)
+    ? Math.round(fund.eps * fund.pb_ratio / displayQuote.close * 10000) / 100
+    : null;
+  const displayRoe = fund?.roe ?? computedRoe;
+
+  // Compute market_cap from shares_outstanding × close price (in 億 NTD)
+  const computedMarketCap = (info?.shares_outstanding && displayQuote?.close)
+    ? Math.round(displayQuote.close * info.shares_outstanding / 1_000_000) / 100
+    : null;
+  const displayMarketCap = fund?.market_cap ?? computedMarketCap;
+
   const TABS = [
     { label: '基本面',   value: 'fundamentals' },
     { label: '起漲分析', value: 'kline'        },
@@ -191,7 +204,7 @@ export default function StockClient({ initialData }: { initialData?: any }) {
               <span>成交量：<span className="num">{displayQuote?.volume?.toLocaleString('en-US') ?? '—'}</span> 張</span>
               <span>52週高：<span className="num" style={{ color: 'var(--accent-red)' }}>{high52w ? fmt(high52w) : '—'}</span></span>
               <span>52週低：<span className="num" style={{ color: 'var(--accent-green)' }}>{low52w ? fmt(low52w) : '—'}</span></span>
-              <span>市值：<span className="num">{fund?.market_cap ? formatNTD(fund.market_cap) : '—'}</span></span>
+              <span>市值：<span className="num">{displayMarketCap ? formatNTD(displayMarketCap) : '—'}</span></span>
             </div>
 
             {/* Row 4: badges + compare link */}
@@ -223,11 +236,11 @@ export default function StockClient({ initialData }: { initialData?: any }) {
             <Metric label="本益比"     value={fmt(fund?.pe_ratio, 1)} />
             <Metric label="股價淨值比" value={fmt(fund?.pb_ratio, 2)} />
             <Metric label="殖利率"     value={dividendSummary?.latest_yield_pct != null ? `${fmt(dividendSummary.latest_yield_pct)}%` : '—'} />
-            <Metric label="ROE"        value={fund?.roe != null ? `${fmt(fund.roe, 1)}%` : '—'} />
+            <Metric label="ROE"        value={displayRoe != null ? `${fmt(displayRoe, 1)}%` : '—'} />
             <Metric label="EPS"        value={fund?.eps != null ? `NT$${fmt(fund.eps)}` : '—'} />
             <Metric label="毛利率"     value={fund?.gross_margin != null ? `${fmt(fund.gross_margin, 1)}%` : '—'} />
             <Metric label="負債比"     value={fund?.debt_ratio != null ? `${fmt(fund.debt_ratio, 1)}%` : '—'} />
-            <Metric label="市值"       value={fund?.market_cap ? formatNTD(fund.market_cap) : '—'} />
+            <Metric label="市值"       value={displayMarketCap ? formatNTD(displayMarketCap) : '—'} />
           </div>
 
           {/* ── PTT WIDGET ───────────────────────────────────────────── */}
