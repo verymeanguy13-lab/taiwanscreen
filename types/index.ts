@@ -17,6 +17,7 @@ export interface Stock {
   description_zh?: string;
   description_en?: string;
   updated_at?: string;
+  shares_outstanding?: number;   // 已發行普通股數
 }
 
 export interface DailyPrice {
