@@ -37,10 +37,10 @@ function toScanResult(r: any, side: 'bull' | 'bear'): ScanResult {
     changePercent: r.changePercent ?? 0,
     signals:       [],
     trendStrength: {
-      bullScore:     side === 'bull' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
-      bearScore:     side === 'bear' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
-      dominantSide:  side,
-      bars:          [],
+      bullScore:    side === 'bull' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
+      bearScore:    side === 'bear' ? (r.matrixScore ?? r.confidence ?? 0) : 0,
+      dominantSide: side,
+      bars:         [],
     },
     yesterdayTrend: r.breakoutType ?? '中性',
     bullCount:      side === 'bull' ? 1 : 0,
@@ -93,13 +93,37 @@ function FilterChips({ filters, active, onSelect, color }: { filters: string[]; 
 }
 
 export function AfterHoursScreener() {
-  const { data: bullData, isLoading: bullLoading } = useSWR('/api/kline/afterhours?side=bull', fetcher, { revalidateOnFocus: false });
-  const { data: bearData, isLoading: bearLoading, error } = useSWR('/api/kline/afterhours?side=bear', fetcher, { revalidateOnFocus: false });
-  const isLoading = bullLoading || bearLoading;
-
   const [activeTab,  setActiveTab]  = useState<'bull' | 'bear'>('bull');
   const [bullFilter, setBullFilter] = useState<string | null>(null);
   const [bearFilter, setBearFilter] = useState<string | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+
+  const { data: bullData, isLoading: bullLoading, mutate: mutateBull } = useSWR(
+    '/api/kline/afterhours?side=bull', fetcher,
+    { revalidateOnFocus: false, refreshInterval: bullData?.marketOpen ? 300000 : 0 }
+  );
+  const { data: bearData, isLoading: bearLoading, error, mutate: mutateBear } = useSWR(
+    '/api/kline/afterhours?side=bear', fetcher,
+    { revalidateOnFocus: false, refreshInterval: bearData?.marketOpen ? 300000 : 0 }
+  );
+
+  const isLoading  = bullLoading || bearLoading;
+  const marketOpen = !!(bullData?.marketOpen || bearData?.marketOpen);
+  const isLive     = !!(bullData?.isLive || bearData?.isLive);
+  const liveAt     = bullData?.liveAt ?? bearData?.liveAt ?? null;
+
+  const handleRebuild = async () => {
+    setRebuilding(true);
+    try {
+      await Promise.all([
+        fetch('/api/kline/afterhours?side=bull&rebuild=true'),
+        fetch('/api/kline/afterhours?side=bear&rebuild=true'),
+      ]);
+      await Promise.all([mutateBull(), mutateBear()]);
+    } finally {
+      setRebuilding(false);
+    }
+  };
 
   const bullResults: ScanResult[] = (bullData?.results ?? [])
     .sort((a: any, b: any) => b.confidence - a.confidence)
@@ -109,13 +133,12 @@ export function AfterHoursScreener() {
     .sort((a: any, b: any) => b.confidence - a.confidence)
     .map((r: any) => toScanResult(r, 'bear'));
 
-  const filteredBull = bullFilter
-    ? bullResults.filter(r => r.yesterdayTrend === bullFilter)
-    : bullResults;
+  const filteredBull = bullFilter ? bullResults.filter(r => r.yesterdayTrend === bullFilter) : bullResults;
+  const filteredBear = bearFilter ? bearResults.filter(r => r.yesterdayTrend === bearFilter) : bearResults;
 
-  const filteredBear = bearFilter
-    ? bearResults.filter(r => r.yesterdayTrend === bearFilter)
-    : bearResults;
+  const liveTimeStr = liveAt
+    ? new Date(liveAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Taipei' })
+    : '';
 
   if (isLoading) {
     return (
@@ -137,6 +160,28 @@ export function AfterHoursScreener() {
 
   return (
     <div style={{ background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
+
+      {/* Status bar */}
+      {marketOpen && isLive ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: '#081208', borderBottom: '1px solid #1a3a1a', fontSize: 11, color: DOWN_COLOR }}>
+          <span>🟢 盤中即時掃描｜更新時間: {liveTimeStr}｜每5分鐘自動更新</span>
+          <button onClick={handleRebuild} disabled={rebuilding} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${DOWN_COLOR}44`, background: `${DOWN_COLOR}11`, color: DOWN_COLOR, opacity: rebuilding ? 0.5 : 1 }}>
+            {rebuilding ? '掃描中...' : '即時重新掃描'}
+          </button>
+        </div>
+      ) : marketOpen && !isLive ? (
+        <div style={{ padding: '8px 16px', background: '#121208', borderBottom: '1px solid #3a3a1a', fontSize: 11, color: '#FFD700' }}>
+          🟡 市場開盤中，載入即時資料...
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: '#08090E', borderBottom: `1px solid ${BORDER}`, fontSize: 11, color: '#8B8FA8' }}>
+          <span>盤後掃描</span>
+          <button onClick={handleRebuild} disabled={rebuilding} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${BORDER}`, background: 'transparent', color: '#8B8FA8', opacity: rebuilding ? 0.5 : 1 }}>
+            {rebuilding ? '重建中...' : '立即重建'}
+          </button>
+        </div>
+      )}
+
       <div style={{ padding: 16, borderBottom: `1px solid ${BORDER}` }}>
         <WorkflowGuide count={totalCount} />
       </div>
@@ -164,7 +209,14 @@ export function AfterHoursScreener() {
               {filteredBull.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無多方候選股</div>
               ) : (
-                filteredBull.map(r => <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bull" />)
+                filteredBull.map((r, i) => (
+                  <div key={r.symbol} style={{ position: 'relative' }}>
+                    <StockSignalCard result={r} mode="afterhours" side="bull" />
+                    {isLive && (bullData?.results?.[i]?.isLivePrice) && (
+                      <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, background: `${DOWN_COLOR}22`, color: DOWN_COLOR, padding: '1px 5px', borderRadius: 3 }}>即時</span>
+                    )}
+                  </div>
+                ))
               )}
             </div>
           </>
@@ -175,7 +227,14 @@ export function AfterHoursScreener() {
               {filteredBear.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無空方候選股</div>
               ) : (
-                filteredBear.map(r => <StockSignalCard key={r.symbol} result={r} mode="afterhours" side="bear" />)
+                filteredBear.map((r, i) => (
+                  <div key={r.symbol} style={{ position: 'relative' }}>
+                    <StockSignalCard result={r} mode="afterhours" side="bear" />
+                    {isLive && (bearData?.results?.[i]?.isLivePrice) && (
+                      <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, background: `${DOWN_COLOR}22`, color: DOWN_COLOR, padding: '1px 5px', borderRadius: 3 }}>即時</span>
+                    )}
+                  </div>
+                ))
               )}
             </div>
           </>
