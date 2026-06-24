@@ -142,7 +142,7 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
   // Compute market_cap from shares_outstanding × close price (in 億 NTD)
   const computedMarketCap = (info?.shares_outstanding && displayQuote?.close)
-    ? Math.round(displayQuote.close * info.shares_outstanding / 1_000_000) / 100
+    ? displayQuote.close * info.shares_outstanding
     : null;
   const displayMarketCap = fund?.market_cap ?? computedMarketCap;
 
