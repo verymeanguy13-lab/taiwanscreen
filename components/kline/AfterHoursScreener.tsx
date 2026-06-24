@@ -97,18 +97,29 @@ export function AfterHoursScreener() {
   const [bullFilter, setBullFilter] = useState<string | null>(null);
   const [bearFilter, setBearFilter] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [marketOpen, setMarketOpen] = useState(false);
 
   const { data: bullData, isLoading: bullLoading, mutate: mutateBull } = useSWR(
-    '/api/kline/afterhours?side=bull', fetcher,
-    { revalidateOnFocus: false, refreshInterval: bullData?.marketOpen ? 300000 : 0 }
+    '/api/kline/afterhours?side=bull',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      refreshInterval: marketOpen ? 300000 : 0,
+      onSuccess: (d) => { if (d?.marketOpen) setMarketOpen(true); },
+    }
   );
+
   const { data: bearData, isLoading: bearLoading, error, mutate: mutateBear } = useSWR(
-    '/api/kline/afterhours?side=bear', fetcher,
-    { revalidateOnFocus: false, refreshInterval: bearData?.marketOpen ? 300000 : 0 }
+    '/api/kline/afterhours?side=bear',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      refreshInterval: marketOpen ? 300000 : 0,
+      onSuccess: (d) => { if (d?.marketOpen) setMarketOpen(true); },
+    }
   );
 
   const isLoading  = bullLoading || bearLoading;
-  const marketOpen = !!(bullData?.marketOpen || bearData?.marketOpen);
   const isLive     = !!(bullData?.isLive || bearData?.isLive);
   const liveAt     = bullData?.liveAt ?? bearData?.liveAt ?? null;
 
