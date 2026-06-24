@@ -173,7 +173,10 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       candleSeries.setData(candles.map(c => ({
         time: c.date as string, open: c.open, high: c.high, low: c.low, close: c.close,
       })));
-
+candleSeries.setData(candles.map(c => ({
+        time: c.date as string, open: c.open, high: c.high, low: c.low, close: c.close,
+      })));
+      chart.timeScale().fitContent();
       const volSeries = chart.addSeries(HistogramSeries, {
         color:        `${UP_COLOR}40`,
         priceFormat:  { type: 'volume' as const },
