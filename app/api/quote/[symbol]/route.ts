@@ -39,7 +39,8 @@ export async function GET(
     // TWSE field names
     // z = current price, o = open, h = high, l = low, v = volume
     // y = yesterday close, c = symbol, n = name
-    const close     = parseFloat(d.z ?? d.y ?? '0');
+    const rawZ = parseFloat(d.z);
+const close = (!isNaN(rawZ) && rawZ > 0) ? rawZ : parseFloat(d.y ?? '0');
     const open      = parseFloat(d.o ?? '0');
     const high      = parseFloat(d.h ?? '0');
     const low       = parseFloat(d.l ?? '0');
