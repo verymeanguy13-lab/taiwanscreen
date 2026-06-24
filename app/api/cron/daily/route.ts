@@ -15,7 +15,6 @@ import {
   ingestDailyPrices,
   ingestInstitutionalFlows,
   ingestMarginData,
-  ingestFundamentals,
 } from '@/lib/ingest';
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -187,41 +186,35 @@ export async function GET(req: NextRequest) {
     }
   })();
 
-  const fundamentals = await (async () => {
-    try { return await ingestFundamentals(); }
-    catch (err) {
-      const msg = `ingestFundamentals fatal: ${err}`;
-      console.error(msg); allErrors.push(msg);
-      return { count: 0, errors: [msg] };
-    }
-  })();
+  allErrors.push(...stocks.errors, ...prices.errors, ...institutional.errors, ...margin.errors);
 
-  allErrors.push(
-    ...stocks.errors,
-    ...prices.errors,
-    ...institutional.errors,
-    ...margin.errors,
-    ...fundamentals.errors,
-  );
+  // ── Background tasks (non-blocking) ───────────────────────────────────────
+  const base = process.env.NEXT_PUBLIC_BASE_URL ?? '';
+  const cronHeader = { 'x-cron-secret': process.env.CRON_SECRET ?? '' };
 
-  // Trigger alert checks
-  await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/cron/alerts`, {
-    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  // pe_ratio, pb_ratio, dividend_yield from TWSE (fast, ~3s)
+  fetch(`${base}/api/admin/twse-fundamentals`, {
+    headers: cronHeader,
+  }).catch(err => console.error('[daily] twse-fundamentals error:', err));
+
+  // Alert checks
+  fetch(`${base}/api/cron/alerts`, {
+    headers: cronHeader,
   }).catch(err => console.error('[daily] alerts cron error:', err));
 
-  // Trigger detect-signals in background (non-blocking)
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/admin/detect-signals?offset=0&limit=200`, {
+  // Signal detection
+  fetch(`${base}/api/admin/detect-signals?offset=0&limit=200`, {
     method: 'POST',
-    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+    headers: cronHeader,
   }).catch(err => console.error('[daily] detect-signals error:', err));
 
-  // Trigger afterhours cache build in background (non-blocking)
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/kline/afterhours?side=bull`, {
-    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  // Afterhours cache
+  fetch(`${base}/api/kline/afterhours?side=bull`, {
+    headers: cronHeader,
   }).catch(err => console.error('[daily] afterhours bull error:', err));
 
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/kline/afterhours?side=bear`, {
-    headers: { 'x-cron-secret': process.env.CRON_SECRET ?? '' },
+  fetch(`${base}/api/kline/afterhours?side=bear`, {
+    headers: cronHeader,
   }).catch(err => console.error('[daily] afterhours bear error:', err));
 
   console.log(`[cron/daily] Completed for ${taiwanDate}. Errors: ${allErrors.length}`);
@@ -234,7 +227,6 @@ export async function GET(req: NextRequest) {
       prices:        { count: prices.count },
       institutional: { count: institutional.count },
       margin:        { count: margin.count },
-      fundamentals:  { count: fundamentals.count },
       backfill:      backfillResults,
     },
     errors: allErrors,
