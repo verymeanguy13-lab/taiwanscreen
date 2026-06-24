@@ -79,10 +79,10 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
   // Live quote — refreshes every 15 seconds
   const { data: liveQuote } = useSWR(
-    symbol ? `/api/quote/${symbol}` : null,
-    fetcher,
-    { refreshInterval: 15_000 },
-  );
+  symbol ? `/api/quote/${symbol}` : null,
+  fetcher,
+  { refreshInterval: (data) => data?.isLive === false ? 0 : 15_000 }
+);
 
   // ── Loading ────────────────────────────────────────────────────────────────
   if (isLoading) {
@@ -192,11 +192,11 @@ export default function StockClient({ initialData }: { initialData?: any }) {
                   {(displayQuote.change_pct ?? 0) > 0 ? '▲' : (displayQuote.change_pct ?? 0) < 0 ? '▼' : ''}
                 </span>
               )}
-              {liveQuote?.time && (
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  即時 {liveQuote.time}
-                </span>
-              )}
+              {liveQuote?.isLive && liveQuote?.time && (
+  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+    即時 {liveQuote.time}
+  </span>
+)}
             </div>
 
             {/* Row 3: stats */}
