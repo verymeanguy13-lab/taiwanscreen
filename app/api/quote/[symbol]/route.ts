@@ -40,7 +40,14 @@ export async function GET(
     // z = current price, o = open, h = high, l = low, v = volume
     // y = yesterday close, c = symbol, n = name
     const rawZ = parseFloat(d.z);
-const close = (!isNaN(rawZ) && rawZ > 0) ? rawZ : parseFloat(d.y ?? '0');
+const bestAsk = parseFloat(d.a?.split('_')[0] ?? '');
+const bestBid = parseFloat(d.b?.split('_')[0] ?? '');
+const midpoint = (!isNaN(bestAsk) && !isNaN(bestBid) && bestAsk > 0 && bestBid > 0)
+  ? (bestAsk + bestBid) / 2
+  : null;
+const close = (!isNaN(rawZ) && rawZ > 0)
+  ? rawZ
+  : (midpoint ?? parseFloat(d.y ?? '0'));
     const open      = parseFloat(d.o ?? '0');
     const high      = parseFloat(d.h ?? '0');
     const low       = parseFloat(d.l ?? '0');
