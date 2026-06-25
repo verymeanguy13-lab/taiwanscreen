@@ -54,6 +54,18 @@ export async function ingestDailyPrices(date: string): Promise<IngestResult> {
   const prices = await fetchAllStockPrices();
   console.log(`[ingestDailyPrices] Fetched ${prices.length} price records.`);
 
+  // Safety check — STOCK_DAY_ALL returns the latest trading day's data.
+  // If today is a holiday or the exchange hasn't published yet,
+  // the data may be from a previous day. Skip ingestion to avoid duplicates.
+  const alreadyExists = await queryUnsafe<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM daily_prices WHERE date = $1`,
+    [date],
+  );
+  if (parseInt(alreadyExists[0]?.cnt ?? '0', 10) > 100) {
+    console.log(`[ingestDailyPrices] Data for ${date} already exists (${alreadyExists[0].cnt} rows), skipping.`);
+    return { count: 0, errors: [] };
+  }
+
   for (const p of prices) {
     try {
       await queryUnsafe(
