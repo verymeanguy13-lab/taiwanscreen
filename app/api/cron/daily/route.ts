@@ -4,8 +4,11 @@
 // Stripped to prices + institutional + margin only to avoid timeout.
 // Signal accuracy is updated separately via /api/admin/update-signals
 //
-// Self-healing: if today's prices are missing, falls back to MI_INDEX
-// date-specific endpoint to backfill up to 3 recent missing days.
+// EOD prices now use MI_INDEX as the primary source (via fetchAllStockPrices
+// in lib/twse.ts), which returns final verified closing prices for all stocks.
+//
+// Self-healing: if a recent business day's prices are missing, backfillPricesForDate
+// fetches them using the same MI_INDEX endpoint for that specific date.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,8 +23,8 @@ import {
 const sql = neon(process.env.DATABASE_URL!);
 
 function toTWSEDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const y   = d.getFullYear();
+  const m   = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}${m}${day}`;
 }
@@ -30,85 +33,151 @@ function toISO(d: Date): string {
   return d.toISOString().split('T')[0];
 }
 
-// Get last N business days (not including today)
+// Get last N business days (not including today, in Taiwan time)
 function pastBusinessDays(n: number): Date[] {
   const days: Date[] = [];
-  const now = new Date();
-  const d = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const tw = new Date(new Date().getTime() + 8 * 60 * 60 * 1000);
   while (days.length < n) {
-    d.setDate(d.getDate() - 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) days.push(new Date(d));
+    tw.setDate(tw.getDate() - 1);
+    const dow = tw.getUTCDay();
+    if (dow !== 0 && dow !== 6) days.push(new Date(tw));
   }
   return days.reverse();
 }
 
-// Backfill prices for a specific date using MI_INDEX (date-aware endpoint)
+// ---------------------------------------------------------------------------
+// backfillPricesForDate — fetches final EOD prices for a specific past date
+// using the same MI_INDEX endpoint (TWSE) used as the primary source.
+// TPEx backfill uses the same aftertrading endpoint with the specific date.
+// ---------------------------------------------------------------------------
 async function backfillPricesForDate(twseDate: string, isoDate: string): Promise<number> {
-  const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${twseDate}&type=ALLBUT0999`;
+  const clean = (s: string) => parseFloat(String(s).replace(/,/g, '').trim()) || 0;
+  let count = 0;
+
+  // ── TWSE MI_INDEX ──────────────────────────────────────────────────────────
   try {
+    const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${twseDate}&type=ALLBUT0999`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
     });
-    if (!res.ok) return 0;
-    const json = await res.json();
-    if (json.stat !== 'OK') return 0;
+    if (!res.ok) {
+      console.error(`[backfill] TWSE MI_INDEX HTTP ${res.status} for ${twseDate}`);
+    } else {
+      const json = await res.json();
+      if (json?.stat === 'OK' && Array.isArray(json.tables)) {
+        const tables = json.tables as Array<{ fields?: string[]; data?: string[][] }>;
+        const priceTable = tables.find(t =>
+          Array.isArray(t.fields) && t.fields.length >= 9 && t.fields[0]?.includes('證券代號')
+        );
 
-    const tables = json.tables as Array<{ title: string; fields: string[]; data: string[][] }>;
-    if (!tables) return 0;
+        if (priceTable?.data) {
+          for (const row of priceTable.data) {
+            if (row.length < 11) continue;
+            const symbol = String(row[0]).trim();
+            if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
-    const priceTable = tables.find((t: any) =>
-      t.fields && t.fields.length >= 9 && t.fields[0]?.includes('證券代號')
-    );
-    if (!priceTable?.data) return 0;
+            const volume     = Math.round(clean(row[2]) / 1000);
+            const open       = clean(row[5]);
+            const high       = clean(row[6]);
+            const low        = clean(row[7]);
+            const close      = clean(row[8]);
+            if (!close || close <= 0) continue;
 
-    const clean = (s: string) => parseFloat(s.replace(/,/g, '').trim()) || 0;
-    let count = 0;
+            const direction  = String(row[9] ?? '').trim();
+            const sign       = direction === '-' ? -1 : 1;
+            const change_amt = sign * clean(row[10]);
+            const prevClose  = close - change_amt;
+            const change_pct = prevClose > 0
+              ? Math.round((change_amt / prevClose) * 10000) / 100
+              : 0;
 
-    for (const row of priceTable.data) {
-      if (row.length < 9) continue;
-      const symbol = row[0]?.trim();
-      if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
-
-      const volume     = Math.round(clean(row[2]) / 1000);
-      const open       = clean(row[5]);
-      const high       = clean(row[6]);
-      const low        = clean(row[7]);
-      const close      = clean(row[8]);
-      const sign       = row[9]?.trim() === '-' ? -1 : 1;
-      const change_amt = sign * clean(row[10]);
-      const change_pct = (close - change_amt) > 0
-        ? Math.round((change_amt / (close - change_amt)) * 10000) / 100
-        : 0;
-
-      if (!close || close <= 0) continue;
-
-      try {
-        await sql`
-          INSERT INTO daily_prices
-            (symbol, date, open, high, low, close, volume, change_amt, change_pct)
-          VALUES (
-            ${symbol}, ${isoDate}, ${open}, ${high}, ${low},
-            ${close}, ${volume}, ${change_amt}, ${change_pct}
-          )
-          ON CONFLICT (symbol, date) DO UPDATE SET
-            open       = EXCLUDED.open,
-            high       = EXCLUDED.high,
-            low        = EXCLUDED.low,
-            close      = EXCLUDED.close,
-            volume     = EXCLUDED.volume,
-            change_amt = EXCLUDED.change_amt,
-            change_pct = EXCLUDED.change_pct
-        `;
-        count++;
-      } catch { /* skip FK violations */ }
+            try {
+              await sql`
+                INSERT INTO daily_prices
+                  (symbol, date, open, high, low, close, volume, change_amt, change_pct)
+                VALUES (
+                  ${symbol}, ${isoDate}, ${open}, ${high}, ${low},
+                  ${close}, ${volume}, ${change_amt}, ${change_pct}
+                )
+                ON CONFLICT (symbol, date) DO UPDATE SET
+                  open       = EXCLUDED.open,
+                  high       = EXCLUDED.high,
+                  low        = EXCLUDED.low,
+                  close      = EXCLUDED.close,
+                  volume     = EXCLUDED.volume,
+                  change_amt = EXCLUDED.change_amt,
+                  change_pct = EXCLUDED.change_pct
+              `;
+              count++;
+            } catch { /* skip FK violations */ }
+          }
+        }
+      }
     }
-
-    return count;
-  } catch {
-    return 0;
+  } catch (err) {
+    console.error(`[backfill] TWSE MI_INDEX error for ${twseDate}:`, err);
   }
+
+  // ── TPEx aftertrading ──────────────────────────────────────────────────────
+  try {
+    const tpexDate = `${twseDate.slice(0, 4)}/${twseDate.slice(4, 6)}/${twseDate.slice(6, 8)}`;
+    const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      console.error(`[backfill] TPEx HTTP ${res.status} for ${tpexDate}`);
+    } else {
+      const json = await res.json();
+      if (json && Array.isArray(json.aaData)) {
+        for (const row of json.aaData as string[][]) {
+          if (!row || row.length < 7) continue;
+          const symbol = String(row[0]).trim();
+          if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+
+          const close = clean(row[2]);
+          if (!close || close <= 0) continue;
+
+          const changeRaw  = String(row[3] ?? '').replace(/,/g, '').replace(/^\+/, '');
+          const change_amt = changeRaw === '---' || changeRaw === '' ? 0 : parseFloat(changeRaw) || 0;
+          const open       = clean(row[4]);
+          const high       = clean(row[5]);
+          const low        = clean(row[6]);
+          const volume     = Math.round(clean(row[8]) / 1000);
+          const prevClose  = close - change_amt;
+          const change_pct = prevClose > 0
+            ? Math.round((change_amt / prevClose) * 10000) / 100
+            : 0;
+
+          try {
+            await sql`
+              INSERT INTO daily_prices
+                (symbol, date, open, high, low, close, volume, change_amt, change_pct)
+              VALUES (
+                ${symbol}, ${isoDate}, ${open}, ${high}, ${low},
+                ${close}, ${volume}, ${change_amt}, ${change_pct}
+              )
+              ON CONFLICT (symbol, date) DO UPDATE SET
+                open       = EXCLUDED.open,
+                high       = EXCLUDED.high,
+                low        = EXCLUDED.low,
+                close      = EXCLUDED.close,
+                volume     = EXCLUDED.volume,
+                change_amt = EXCLUDED.change_amt,
+                change_pct = EXCLUDED.change_pct
+            `;
+            count++;
+          } catch { /* skip FK violations */ }
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[backfill] TPEx error for ${twseDate}:`, err);
+  }
+
+  return count;
 }
 
 export async function GET(req: NextRequest) {
@@ -131,7 +200,7 @@ export async function GET(req: NextRequest) {
   const allErrors: string[] = [];
   const backfillResults: Record<string, number> = {};
 
-  // ── Self-healing: check for missing days and backfill ─────────────────────
+  // ── Self-healing: check for missing recent days and backfill ─────────────
   const recentDays = pastBusinessDays(3);
   const [latestPrice] = await sql`SELECT MAX(date) as d FROM daily_prices`;
   const latestPriceDate = latestPrice?.d ? String(latestPrice.d).slice(0, 10) : null;
@@ -140,7 +209,7 @@ export async function GET(req: NextRequest) {
     const isoDate = toISO(day);
     if (latestPriceDate && isoDate <= latestPriceDate) continue;
 
-    console.log(`[cron/daily] Missing prices for ${isoDate}, backfilling...`);
+    console.log(`[cron/daily] Missing prices for ${isoDate}, backfilling via MI_INDEX...`);
     const count = await backfillPricesForDate(toTWSEDate(day), isoDate);
     backfillResults[isoDate] = count;
     if (count === 0) {
@@ -150,6 +219,8 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Main ingestion for today ───────────────────────────────────────────────
+  // ingestDailyPrices calls fetchAllStockPrices(taiwanDate) which now uses
+  // MI_INDEX as the primary source — final verified EOD prices.
   const stocks = await (async () => {
     try { return await ingestStockList(); }
     catch (err) {

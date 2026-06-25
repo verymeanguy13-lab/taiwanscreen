@@ -1,5 +1,8 @@
 // =============================================================================
 // lib/twse.ts — TWSE + TPEx OpenAPI client
+// Primary EOD price source: MI_INDEX (TWSE) + TPEx aftertrading endpoint
+// These return final verified closing prices, unlike STOCK_DAY_ALL which may
+// reflect incomplete intraday data if queried before TWSE finishes publishing.
 // =============================================================================
 
 const BASE_URL      = 'https://openapi.twse.com.tw';
@@ -67,12 +70,12 @@ export interface RawFundamentals {
   dividend_yield: number | null;
 }
 
-function parseNum(val: string | undefined | null): number {
+export function parseNum(val: string | undefined | null): number {
   if (!val) return 0;
   return parseFloat(String(val).replace(/,/g, '')) || 0;
 }
 
-function parseNumNullable(val: string | undefined | null): number | null {
+export function parseNumNullable(val: string | undefined | null): number | null {
   if (!val || val === '--' || val === '-' || val.trim() === '') return null;
   const n = parseFloat(String(val).replace(/,/g, ''));
   return isNaN(n) ? null : n;
@@ -100,115 +103,159 @@ async function twseFetch<T>(path: string): Promise<T[]> {
   }
 }
 
-async function tpexFetch<T>(path: string): Promise<T[]> {
-  try {
-    const res = await fetch(`${TPEX_BASE_URL}${path}`, {
-      headers: { 'Accept': 'application/json' },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      console.error(`[tpexFetch] HTTP ${res.status} for ${path}`);
-      return [];
-    }
-    const data = await res.json();
-    if (!Array.isArray(data)) {
-      console.error(`[tpexFetch] Non-array response for ${path}`);
-      return [];
-    }
-    return data as T[];
-  } catch (err) {
-    console.error(`[tpexFetch] Failed to fetch ${path}:`, err);
-    return [];
-  }
-}
+// ---------------------------------------------------------------------------
+// fetchAllStockPrices — uses MI_INDEX (TWSE) + TPEx aftertrading as primary
+// sources for final verified EOD prices.
+//
+// Pass `yyyymmdd` (e.g. "20250617") to fetch a specific date; omit or pass
+// undefined to use today's Taiwan date.
+// ---------------------------------------------------------------------------
+export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPrice[]> {
+  // Derive Taiwan date string if not provided
+  const dateStr = yyyymmdd ?? (() => {
+    const now = new Date();
+    const tw  = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const y   = tw.getUTCFullYear();
+    const m   = String(tw.getUTCMonth() + 1).padStart(2, '0');
+    const d   = String(tw.getUTCDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+  })();
 
-export async function fetchAllStockPrices(): Promise<RawStockPrice[]> {
-  try {
-    type TWSEStockDay = {
-      Code:          string;
-      Name:          string;
-      TradeVolume:   string;
-      OpeningPrice:  string;
-      HighestPrice:  string;
-      LowestPrice:   string;
-      ClosingPrice:  string;
-      Change:        string;
-    };
+  const clean = (s: string) => parseFloat(String(s).replace(/,/g, '').trim()) || 0;
 
-    const twseRows = await twseFetch<TWSEStockDay>('/v1/exchangeReport/STOCK_DAY_ALL');
-
-    const twsePrices: RawStockPrice[] = twseRows
-      .filter(r => r.Code && r.ClosingPrice && r.ClosingPrice !== '--')
-      .map(r => {
-        const close      = parseNum(r.ClosingPrice);
-        const change_amt = parseNum(r.Change);
-        const prevClose  = close - change_amt;
-        const change_pct = prevClose !== 0 ? (change_amt / prevClose) * 100 : 0;
-        return {
-          symbol:     r.Code.trim(),
-          name_zh:    r.Name.trim(),
-          volume:     Math.round(parseNum(r.TradeVolume) / 1000),
-          open:       parseNum(r.OpeningPrice),
-          high:       parseNum(r.HighestPrice),
-          low:        parseNum(r.LowestPrice),
-          close,
-          change_amt,
-          change_pct: Math.round(change_pct * 100) / 100,
-        };
-      });
-
-    console.log(`[fetchAllStockPrices] TWSE: ${twsePrices.length} stocks`);
-
-    type TPExStockDay = {
-      SecuritiesCompanyCode: string;
-      CompanyName:           string;
-      Open:                  string;
-      High:                  string;
-      Low:                   string;
-      Close:                 string;
-      Change:                string;
-      TradingShares:         string;
-    };
-
-    let tpexPrices: RawStockPrice[] = [];
+  // ── TWSE: MI_INDEX ────────────────────────────────────────────────────────
+  const twsePrices: RawStockPrice[] = await (async () => {
     try {
-      const tpexRows = await tpexFetch<TPExStockDay>('/openapi/v1/tpex_mainboard_daily_close_quotes');
+      const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${dateStr}&type=ALLBUT0999`;
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible)' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) {
+        console.error(`[fetchAllStockPrices] TWSE MI_INDEX HTTP ${res.status}`);
+        return [];
+      }
 
-      tpexPrices = tpexRows
-        .filter(r => r.SecuritiesCompanyCode && r.Close && r.Close !== '--' && r.Close !== '0')
-        .map(r => {
-          const close      = parseNum(r.Close);
-          const change_amt = parseNum(r.Change);
-          const prevClose  = close - change_amt;
-          const change_pct = prevClose !== 0 ? (change_amt / prevClose) * 100 : 0;
-          return {
-            symbol:     r.SecuritiesCompanyCode.trim(),
-            name_zh:    r.CompanyName?.trim() ?? '',
-            volume:     Math.round(parseNum(r.TradingShares) / 1000),
-            open:       parseNum(r.Open),
-            high:       parseNum(r.High),
-            low:        parseNum(r.Low),
-            close,
-            change_amt,
-            change_pct: Math.round(change_pct * 100) / 100,
-          };
-        });
+      const json = await res.json();
+      if (!json || json.stat !== 'OK' || !Array.isArray(json.tables)) {
+        console.error('[fetchAllStockPrices] TWSE MI_INDEX bad response, stat:', json?.stat);
+        return [];
+      }
 
-      console.log(`[fetchAllStockPrices] TPEx: ${tpexPrices.length} stocks`);
+      // Find the price table: fields[0] contains '證券代號', length >= 9
+      const tables = json.tables as Array<{ title?: string; fields?: string[]; data?: string[][] }>;
+      const priceTable = tables.find(t =>
+        Array.isArray(t.fields) && t.fields.length >= 9 && t.fields[0]?.includes('證券代號')
+      );
+      if (!priceTable?.data) {
+        console.error('[fetchAllStockPrices] TWSE MI_INDEX: price table not found');
+        return [];
+      }
+
+      const results: RawStockPrice[] = [];
+      for (const row of priceTable.data) {
+        if (row.length < 11) continue;
+        const symbol = String(row[0]).trim();
+        if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+
+        const name_zh    = String(row[1] ?? '').trim();
+        // row layout (0-indexed): [code, name, volume(shares), txns, value,
+        //   open, high, low, close, direction, change, ...]
+        const volume     = Math.round(clean(row[2]) / 1000); // shares → lots
+        const open       = clean(row[5]);
+        const high       = clean(row[6]);
+        const low        = clean(row[7]);
+        const close      = clean(row[8]);
+        if (!close || close <= 0) continue;
+
+        // row[9] is '+'/'-'/'X'/'=', row[10] is the absolute change amount
+        const direction  = String(row[9] ?? '').trim();
+        const sign       = direction === '-' ? -1 : 1;
+        const change_amt = sign * clean(row[10]);
+        const prevClose  = close - change_amt;
+        const change_pct = prevClose > 0
+          ? Math.round((change_amt / prevClose) * 10000) / 100
+          : 0;
+
+        results.push({ symbol, name_zh, volume, open, high, low, close, change_amt, change_pct });
+      }
+
+      console.log(`[fetchAllStockPrices] TWSE MI_INDEX: ${results.length} stocks for ${dateStr}`);
+      return results;
+    } catch (err) {
+      console.error('[fetchAllStockPrices] TWSE MI_INDEX fetch failed:', err);
+      return [];
+    }
+  })();
+
+  // ── TPEx: aftertrading final EOD ──────────────────────────────────────────
+  const tpexPrices: RawStockPrice[] = await (async () => {
+    try {
+      // Convert YYYYMMDD → YYYY/MM/DD for TPEx
+      const tpexDate = `${dateStr.slice(0, 4)}/${dateStr.slice(4, 6)}/${dateStr.slice(6, 8)}`;
+      const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
+
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible)' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) {
+        console.error(`[fetchAllStockPrices] TPEx HTTP ${res.status}`);
+        return [];
+      }
+
+      const json = await res.json();
+      // TPEx returns { iTotalRecords, aaData: [...] }
+      if (!json || !Array.isArray(json.aaData)) {
+        console.error('[fetchAllStockPrices] TPEx: unexpected response shape');
+        return [];
+      }
+
+      const results: RawStockPrice[] = [];
+      for (const row of json.aaData as string[][]) {
+        // Typical TPEx aaData columns:
+        // [0] code, [1] name, [2] close, [3] change, [4] open, [5] high,
+        // [6] low, [7] avg, [8] volume(shares), [9] value, [10] txns, ...
+        if (!row || row.length < 7) continue;
+        const symbol = String(row[0]).trim();
+        if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+
+        const name_zh    = String(row[1] ?? '').trim();
+        const close      = clean(row[2]);
+        if (!close || close <= 0) continue;
+
+        // change may be '+N.NN' / '-N.NN' / '---'
+        const changeRaw  = String(row[3] ?? '').replace(/,/g, '').replace(/^\+/, '');
+        const change_amt = changeRaw === '---' || changeRaw === '' ? 0 : parseFloat(changeRaw) || 0;
+        const open       = clean(row[4]);
+        const high       = clean(row[5]);
+        const low        = clean(row[6]);
+        const volume     = Math.round(clean(row[8]) / 1000); // shares → lots
+        const prevClose  = close - change_amt;
+        const change_pct = prevClose > 0
+          ? Math.round((change_amt / prevClose) * 10000) / 100
+          : 0;
+
+        results.push({ symbol, name_zh, volume, open, high, low, close, change_amt, change_pct });
+      }
+
+      console.log(`[fetchAllStockPrices] TPEx: ${results.length} stocks for ${dateStr}`);
+      return results;
     } catch (err) {
       console.error('[fetchAllStockPrices] TPEx fetch failed:', err);
+      return [];
     }
+  })();
 
-    const merged = new Map<string, RawStockPrice>();
-    for (const p of tpexPrices) merged.set(p.symbol, p);
-    for (const p of twsePrices) merged.set(p.symbol, p);
+  // Merge: TWSE wins on conflict (TPEx listed stocks are different symbols anyway)
+  const merged = new Map<string, RawStockPrice>();
+  for (const p of tpexPrices) merged.set(p.symbol, p);
+  for (const p of twsePrices) merged.set(p.symbol, p);
 
-    console.log(`[fetchAllStockPrices] Total combined: ${merged.size} stocks`);
-    return Array.from(merged.values());
-  } catch (err) {
-    console.error('[fetchAllStockPrices] Unexpected error:', err);
-    return [];
-  }
+  console.log(`[fetchAllStockPrices] Total combined: ${merged.size} stocks`);
+  return Array.from(merged.values());
 }
 
 export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]> {
