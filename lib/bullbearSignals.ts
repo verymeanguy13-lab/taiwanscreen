@@ -68,6 +68,7 @@ export type YesterdayTrend =
 export type AfterHoursBullStrategy =
   | '昨日強勢股'
   | '近五日強勢股'
+  | '近十日強勢股'
   | '開布林'
   | '突破均線'
   | '突破壓力'
@@ -341,15 +342,19 @@ export function classifyYesterdayTrend(
     high5 > 0 && (high5 - last.close) / high5 < 0.03
   ) return '昨日強勢股';
 
-  // 近五日強勢: above both MAs and near 5-day high
+  // 近五日強勢: above MA20 and near 5-day high
   if (
     ma20 !== null && last.close > ma20 &&
     high5 > 0 && (high5 - last.close) / high5 < 0.05
   ) return '近五日強勢股';
 
-  // 近十日強勢: above both sma20 and sma60
-  if (ma20 !== null && ma60 !== null && last.close > ma20 && last.close > ma60)
-    return '近十日強勢股';
+  // 近十日強勢: above both MAs, volume healthy, NOT overextended above MA20
+  if (
+    ma20 !== null && ma60 !== null &&
+    last.close > ma20 && last.close > ma60 &&
+    (last.volume ?? 0) > 1.1 * avgVol5 &&
+    ma20 > 0 && (last.close - ma20) / ma20 < 0.08
+  ) return '近十日強勢股';
 
   // 昨日弱勢: down candle, vol > 1.2x avg, close within 3% of 5-day low
   if (
@@ -404,7 +409,6 @@ export function evaluateAfterHours(
   const todayVol = last.volume ?? 0;
 
   // ── MACD histogram trend (last 3 days) ──
-  // Approximate: compare recent closes to ma12/ma26
   const ema12arr = sma(closes, 12); // approx
   const ema26arr = sma(closes, 26);
   const macdNow  = (lastVal(ema12arr) ?? 0) - (lastVal(ema26arr) ?? 0);
@@ -412,7 +416,6 @@ export function evaluateAfterHours(
   const macdGrowing = macdNow > macdPrev;
 
   // ── Trend line breakout: find last 2 swing highs ──
-  // A swing high: local max over 5-day window
   const swingHighs: { idx: number; price: number }[] = [];
   for (let i = 5; i < n - 1 && swingHighs.length < 2; i++) {
     const window = candles.slice(i - 2, i + 3).map((c) => c.high);
@@ -422,8 +425,7 @@ export function evaluateAfterHours(
   }
   let aboveTrendLine = false;
   if (swingHighs.length === 2) {
-    const [sh1, sh2] = swingHighs; // sh1 older, sh2 newer
-    // Slope per candle
+    const [sh1, sh2] = swingHighs;
     const slope = (sh2.price - sh1.price) / (sh2.idx - sh1.idx);
     const trendAtNow = sh2.price + slope * (n - 1 - sh2.idx);
     aboveTrendLine = last.close > trendAtNow;
@@ -445,35 +447,32 @@ export function evaluateAfterHours(
 
   // ── Bull strategies ──────────────────────────────────────────────────────
 
-  // Weights based on measured win rates (June 2026 data):
-  // 突破均線 83%, 剛轉多 75%, 昨日強勢股 67%, 近五日強勢股 60%
-  // 突破壓力 58%, 開布林 57%, 突破趨勢線 51%, 近十日強勢股 22% (removed)
-  if (trend === '昨日強勢股')  addBull('昨日強勢股',  20);
-  if (trend === '近五日強勢股') addBull('近五日強勢股', 15);
-  // 近十日強勢股 removed — 22% win rate, worse than random
+  if (trend === '昨日強勢股')  addBull('昨日強勢股',  12);
+  if (trend === '近五日強勢股') addBull('近五日強勢股', 12);
+  if (trend === '近十日強勢股') addBull('近十日強勢股', 12);
 
   // 開布林: close above upper BB
   if (bbUpper !== null && last.close > bbUpper)
-    addBull('開布林', 15);
+    addBull('開布林', 20);
 
-  // 突破均線: crossed above ma20 today — 83% win rate, highest conviction
+  // 突破均線: crossed above ma20 today
   if (ma20Now !== null && ma20Prev !== null && last.close > ma20Now && candles[n - 2].close <= ma20Prev)
-    addBull('突破均線', 30);
+    addBull('突破均線', 12);
 
   // 突破壓力: today close > 20-day high (excluding today)
   const prior20High = Math.max(...candles.slice(Math.max(0, n - 21), n - 1).map((c) => c.high));
   if (last.close > prior20High)
-    addBull('突破壓力', 15);
+    addBull('突破壓力', 20);
 
-  // 剛轉多: ma5 crossed above ma20 in last 2 days — 75% win rate
+  // 剛轉多: ma5 crossed above ma20 in last 2 days
   if (
     ma5Now !== null && ma20Now !== null && ma5Prev !== null && ma20Prev !== null &&
     ma5Now > ma20Now && ma5Prev <= ma20Prev
-  ) addBull('剛轉多', 25);
+  ) addBull('剛轉多', 18);
 
-  // 突破趨勢線 — 51% win rate, bonus points only
-  if (aboveTrendLine)
-    addBull('突破趨勢線', 8);
+  // 突破趨勢線: must have volume confirmation and be an up candle
+  if (aboveTrendLine && todayVol > 1.2 * avgVol10 && last.close > last.open)
+    addBull('突破趨勢線', 12);
 
   // ── Bear strategies ──────────────────────────────────────────────────────
 
