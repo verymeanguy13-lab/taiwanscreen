@@ -1,6 +1,6 @@
 // =============================================================================
 // app/api/cron/daily/route.ts
-// Triggered by Vercel Cron at 08:30 UTC = 4:30pm Taiwan time, weekdays.
+// Triggered by Vercel Cron at 10:30 UTC = 6:30pm Taiwan time, weekdays.
 // Stripped to prices + institutional + margin only to avoid timeout.
 // Signal accuracy is updated separately via /api/admin/update-signals
 //
@@ -84,8 +84,9 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
             const close      = clean(row[8]);
             if (!close || close <= 0) continue;
 
+            // row[9] may be HTML like <p style= color:green>-</p>
             const direction  = String(row[9] ?? '').trim();
-            const sign       = direction === '-' ? -1 : 1;
+            const sign       = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
             const change_amt = sign * clean(row[10]);
             const prevClose  = close - change_amt;
             const change_pct = prevClose > 0
@@ -169,7 +170,7 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
                 change_pct = EXCLUDED.change_pct
             `;
             count++;
-          } catch { /* skip FK violations */ }
+          } catch { /* skip */ }
         }
       }
     }
@@ -219,8 +220,6 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Main ingestion for today ───────────────────────────────────────────────
-  // ingestDailyPrices calls fetchAllStockPrices(taiwanDate) which now uses
-  // MI_INDEX as the primary source — final verified EOD prices.
   const stocks = await (async () => {
     try { return await ingestStockList(); }
     catch (err) {
@@ -263,23 +262,19 @@ export async function GET(req: NextRequest) {
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? '';
   const cronHeader = { 'x-cron-secret': process.env.CRON_SECRET ?? '' };
 
-  // pe_ratio, pb_ratio, dividend_yield from TWSE (fast, ~3s)
   fetch(`${base}/api/admin/twse-fundamentals`, {
     headers: cronHeader,
   }).catch(err => console.error('[daily] twse-fundamentals error:', err));
 
-  // Alert checks
   fetch(`${base}/api/cron/alerts`, {
     headers: cronHeader,
   }).catch(err => console.error('[daily] alerts cron error:', err));
 
-  // Signal detection
   fetch(`${base}/api/admin/detect-signals?offset=0&limit=200`, {
     method: 'POST',
     headers: cronHeader,
   }).catch(err => console.error('[daily] detect-signals error:', err));
 
-  // Afterhours cache
   fetch(`${base}/api/kline/afterhours?side=bull`, {
     headers: cronHeader,
   }).catch(err => console.error('[daily] afterhours bull error:', err));

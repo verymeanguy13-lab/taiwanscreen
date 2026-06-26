@@ -37,7 +37,9 @@ export async function GET(req: NextRequest) {
           if (!/^\d{4,6}$/.test(symbol)) continue;
           const close = clean(row[8]);
           if (!close || close <= 0) continue;
-          const sign = String(row[9]).trim() === '-' ? -1 : 1;
+          // row[9] may be HTML like <p style= color:green>-</p>
+          const direction = String(row[9] ?? '').trim();
+          const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
           const change_amt = sign * clean(row[10]);
           const prevClose = close - change_amt;
           try {

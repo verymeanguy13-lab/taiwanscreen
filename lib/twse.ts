@@ -167,8 +167,8 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
         const close      = clean(row[8]);
         if (!close || close <= 0) continue;
 
-        const direction  = String(row[9] ?? '').trim();
-        const sign       = direction === '-' ? -1 : 1;
+        const direction = String(row[9] ?? '').trim();
+const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
         const change_amt = sign * clean(row[10]);
         const prevClose  = close - change_amt;
         const change_pct = prevClose > 0
