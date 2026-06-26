@@ -17,7 +17,9 @@ export function isMarketOpen(): boolean {
   const taipei = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
   const day = taipei.getDay();
   const minuteOfDay = taipei.getHours() * 60 + taipei.getMinutes();
-  return day >= 1 && day <= 5 && minuteOfDay >= 540 && minuteOfDay < 810;
+  // Extended to 18:30 (1110 min) so TWSE MIS still serves final closing price
+  // after market close (13:30) until our cron ingests EOD data at 18:30.
+  return day >= 1 && day <= 5 && minuteOfDay >= 540 && minuteOfDay < 1110;
 }
 
 export async function fetchLivePrices(
