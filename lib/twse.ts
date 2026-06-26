@@ -160,8 +160,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
         if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
         const name_zh    = String(row[1] ?? '').trim();
-        // row layout (0-indexed): [code, name, volume(shares), txns, value,
-        //   open, high, low, close, direction, change, ...]
         const volume     = Math.round(clean(row[2]) / 1000); // shares → lots
         const open       = clean(row[5]);
         const high       = clean(row[6]);
@@ -169,7 +167,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
         const close      = clean(row[8]);
         if (!close || close <= 0) continue;
 
-        // row[9] is '+'/'-'/'X'/'=', row[10] is the absolute change amount
         const direction  = String(row[9] ?? '').trim();
         const sign       = direction === '-' ? -1 : 1;
         const change_amt = sign * clean(row[10]);
@@ -192,7 +189,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
   // ── TPEx: aftertrading final EOD ──────────────────────────────────────────
   const tpexPrices: RawStockPrice[] = await (async () => {
     try {
-      // Convert YYYYMMDD → YYYY/MM/DD for TPEx
       const tpexDate = `${dateStr.slice(0, 4)}/${dateStr.slice(4, 6)}/${dateStr.slice(6, 8)}`;
       const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
 
@@ -207,7 +203,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
       }
 
       const json = await res.json();
-      // TPEx returns { iTotalRecords, aaData: [...] }
       if (!json || !Array.isArray(json.aaData)) {
         console.error('[fetchAllStockPrices] TPEx: unexpected response shape');
         return [];
@@ -215,9 +210,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
 
       const results: RawStockPrice[] = [];
       for (const row of json.aaData as string[][]) {
-        // Typical TPEx aaData columns:
-        // [0] code, [1] name, [2] close, [3] change, [4] open, [5] high,
-        // [6] low, [7] avg, [8] volume(shares), [9] value, [10] txns, ...
         if (!row || row.length < 7) continue;
         const symbol = String(row[0]).trim();
         if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
@@ -226,7 +218,6 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
         const close      = clean(row[2]);
         if (!close || close <= 0) continue;
 
-        // change may be '+N.NN' / '-N.NN' / '---'
         const changeRaw  = String(row[3] ?? '').replace(/,/g, '').replace(/^\+/, '');
         const change_amt = changeRaw === '---' || changeRaw === '' ? 0 : parseFloat(changeRaw) || 0;
         const open       = clean(row[4]);
@@ -249,7 +240,7 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
     }
   })();
 
-  // Merge: TWSE wins on conflict (TPEx listed stocks are different symbols anyway)
+  // Merge: TWSE wins on conflict
   const merged = new Map<string, RawStockPrice>();
   for (const p of tpexPrices) merged.set(p.symbol, p);
   for (const p of twsePrices) merged.set(p.symbol, p);
@@ -258,10 +249,20 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
   return Array.from(merged.values());
 }
 
-export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]> {
+// ---------------------------------------------------------------------------
+// fetchInstitutionalFlows — accepts optional date (YYYYMMDD).
+// Defaults to today's Taiwan date if not provided.
+// ---------------------------------------------------------------------------
+export async function fetchInstitutionalFlows(yyyymmdd?: string): Promise<RawInstitutionalFlow[]> {
   try {
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const dateStr = yyyymmdd ?? (() => {
+      const now = new Date();
+      const tw  = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+      const y   = tw.getUTCFullYear();
+      const m   = String(tw.getUTCMonth() + 1).padStart(2, '0');
+      const d   = String(tw.getUTCDate()).padStart(2, '0');
+      return `${y}${m}${d}`;
+    })();
 
     const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${dateStr}&selectType=ALLBUT0999`;
 
@@ -306,7 +307,7 @@ export async function fetchInstitutionalFlows(): Promise<RawInstitutionalFlow[]>
       });
     }
 
-    console.log(`[fetchInstitutionalFlows] Fetched ${results.length} stocks`);
+    console.log(`[fetchInstitutionalFlows] Fetched ${results.length} stocks for ${dateStr}`);
     return results;
   } catch (err) {
     console.error('[fetchInstitutionalFlows] Unexpected error:', err);

@@ -99,7 +99,7 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
   const errors: string[] = [];
   let count = 0;
 
-  const flows = await fetchInstitutionalFlows();
+  const flows = await fetchInstitutionalFlows(date.replace(/-/g, ''));
   console.log(`[ingestInstitutionalFlows] Fetched ${flows.length} records.`);
 
   for (const f of flows) {
