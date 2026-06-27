@@ -64,8 +64,8 @@ function LiveMarketBar() {
   }
 
   const items = [
-    { label: '上漲',   value: `${summary.up_count}家`,   color: 'var(--accent-green)' },
-    { label: '下跌',   value: `${summary.down_count}家`, color: 'var(--accent-red)'   },
+    { label: '上漲',   value: `${summary.up_count}家`,   color: 'var(--accent-red)'     },
+    { label: '下跌',   value: `${summary.down_count}家`, color: 'var(--accent-green)'   },
     { label: '平盤',   value: `${summary.flat_count}家`, color: 'var(--text-secondary)' },
     { label: '成交量', value: `${(summary.total_volume / 10_000).toFixed(1)}萬張`, color: 'var(--accent-blue)' },
   ];
@@ -115,7 +115,7 @@ function TopForeignBuyColumn() {
               <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
                 {item.symbol} {item.name_zh}
               </Link>
-              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-green)' }}>
+              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-red)' }}>
                 +{(item.foreign_net / 100_000_000).toFixed(1)}億
               </span>
             </li>
@@ -144,7 +144,7 @@ function TripleBuyColumn() {
               <Link href={`/stock/${item.symbol}`} className="flex-1 font-medium" style={{ color: 'var(--text-primary)' }}>
                 {item.symbol} {item.name_zh}
               </Link>
-              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-green)' }}>
+              <span className="tabular-nums font-semibold" style={{ color: 'var(--accent-red)' }}>
                 {item.total_net != null ? `+${(item.total_net / 100_000_000).toFixed(1)}億` : '三買'}
               </span>
             </li>
@@ -231,7 +231,8 @@ function ScannerSection() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {results.map(r => {
               const cfg = BREAKOUT_CONFIG[r.breakoutType] ?? { color: '#8B8FA8', bg: '#1E2235' };
-              const changeColor = r.changePercent >= 0 ? '#FF4D6D' : '#00D4AA';
+              // Taiwan convention: red = up, green = down
+              const changeColor = r.changePercent >= 0 ? 'var(--accent-red)' : 'var(--accent-green)';
               const score = r.confidence ?? r.matrixScore ?? 0;
               return (
                 <Link key={r.symbol} href={`/stock/${r.symbol}`}
@@ -313,8 +314,8 @@ function AccuracyTeaserSection() {
             ) : (
               <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                 {[
-                  { label: '條件後上漲比例', value: `${priceUpRate}%`, color: priceUpRate >= 50 ? 'var(--accent-green)' : 'var(--accent-red)' },
-                  { label: '平均10日報酬',   value: `${avgReturn >= 0 ? '+' : ''}${avgReturn}%`, color: avgReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' },
+                  { label: '條件後上漲比例', value: `${priceUpRate}%`, color: priceUpRate >= 50 ? 'var(--accent-red)' : 'var(--accent-green)' },
+                  { label: '平均10日報酬',   value: `${avgReturn >= 0 ? '+' : ''}${avgReturn}%`, color: avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
                   { label: '累計訊號次數',   value: total.toLocaleString(), color: 'var(--text-primary)' },
                 ].map(({ label, value, color }) => (
                   <div key={label}>
@@ -340,7 +341,8 @@ function AccuracyTeaserSection() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {topSignals.map((s: any) => {
               const ret = s.return_10d;
-              const retColor = ret === null ? 'var(--text-muted)' : ret >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+              // Taiwan convention: red = up, green = down
+              const retColor = ret === null ? 'var(--text-muted)' : ret >= 0 ? 'var(--accent-red)' : 'var(--accent-green)';
               return (
                 <Link key={s.id} href={`/stock/${s.symbol}`}
                   style={{
@@ -374,8 +376,8 @@ function AccuracyTeaserSection() {
                   </span>
                   <span style={{
                     fontSize: 11, fontWeight: 600, padding: '1px 8px', borderRadius: 4,
-                    color: 'var(--accent-green)', backgroundColor: 'rgba(0,212,170,0.12)',
-                    border: '1px solid rgba(0,212,170,0.3)',
+                    color: 'var(--accent-red)', backgroundColor: 'rgba(255,77,109,0.12)',
+                    border: '1px solid rgba(255,77,109,0.3)',
                   }}>
                     ▲ 上漲
                   </span>
