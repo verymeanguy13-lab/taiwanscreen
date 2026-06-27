@@ -183,7 +183,7 @@ export default function InstitutionalClient() {
     { label: '買超(張)', render: (r: FlowRow) => <NetCell v={r.foreign_net} /> },
     { label: '連買天數', render: (r: FlowRow) => {
       const d = n(r.foreign_consecutive_days);
-      return <span className="num" style={{ color: d > 0 ? 'var(--accent-red)' : 'var(--text-muted)' }}>{d > 0 ? `+${d}日` : '—'}</span>;
+      return <span className="num" style={{ color: d > 0 ? 'var(--accent-green)' : 'var(--text-muted)' }}>{d > 0 ? `+${d}日` : '—'}</span>;
     }},
     { label: '股價',     render: (r: FlowRow) => <span className="num" style={{ color: 'var(--text-secondary)' }}>{r.close != null ? r.close.toFixed(2) : '—'}</span> },
     { label: '漲跌%',   render: (r: FlowRow) => {
@@ -199,7 +199,7 @@ export default function InstitutionalClient() {
     { label: '賣超(張)', render: (r: FlowRow) => <NetCell v={r.foreign_net} /> },
     { label: '連賣天數', render: (r: FlowRow) => {
       const d = n(r.foreign_consecutive_days);
-      return <span className="num" style={{ color: d < 0 ? 'var(--accent-green)' : 'var(--text-muted)' }}>{d < 0 ? `${d}日` : '—'}</span>;
+      return <span className="num" style={{ color: d < 0 ? 'var(--accent-red)' : 'var(--text-muted)' }}>{d < 0 ? `${d}日` : '—'}</span>;
     }},
     { label: '股價',     render: (r: FlowRow) => <span className="num" style={{ color: 'var(--text-secondary)' }}>{r.close != null ? r.close.toFixed(2) : '—'}</span> },
     { label: '漲跌%',   render: (r: FlowRow) => {
@@ -215,7 +215,7 @@ export default function InstitutionalClient() {
     { label: '買超(張)', render: (r: FlowRow) => <NetCell v={r.trust_net} /> },
     { label: '連買天數', render: (r: FlowRow) => {
       const d = n(r.trust_consecutive_days);
-      return <span className="num" style={{ color: d > 0 ? 'var(--accent-red)' : 'var(--text-muted)' }}>{d > 0 ? `+${d}日` : '—'}</span>;
+      return <span className="num" style={{ color: d > 0 ? 'var(--accent-green)' : 'var(--text-muted)' }}>{d > 0 ? `+${d}日` : '—'}</span>;
     }},
     { label: '股價',     render: (r: FlowRow) => <span className="num" style={{ color: 'var(--text-secondary)' }}>{r.close != null ? r.close.toFixed(2) : '—'}</span> },
     { label: '漲跌%',   render: (r: FlowRow) => {
@@ -246,7 +246,7 @@ export default function InstitutionalClient() {
     { label: '股名',       render: (r: FlowRow) => <span style={{ color: 'var(--text-primary)' }}>{r.name_zh}</span> },
     { label: '連續天數',   render: (r: FlowRow) => {
       const d = n(r.foreign_consecutive_days);
-      return <span className="num font-semibold" style={{ color: 'var(--accent-red)' }}>+{d}日</span>;
+      return <span className="num font-semibold" style={{ color: 'var(--accent-green)' }}>+{d}日</span>;
     }},
     { label: '期間漲跌%',  render: (r: FlowRow) => {
       const v = r.period_return_pct;
@@ -261,6 +261,7 @@ export default function InstitutionalClient() {
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="mx-auto max-w-screen-xl px-4 py-6 flex flex-col gap-6">
 
+        {/* ── Page title ─────────────────────────────────────────────────── */}
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
             法人動向
@@ -270,20 +271,29 @@ export default function InstitutionalClient() {
           </p>
         </div>
 
+        {/* ── Today's totals ─────────────────────────────────────────────── */}
         {sumLoading
           ? <div className="flex gap-3"><Skeleton className="h-16 flex-1" /><Skeleton className="h-16 flex-1" /><Skeleton className="h-16 flex-1" /></div>
           : (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2">
               {[
                 { label: '外資',   value: todayForeign, bg: 'rgba(61,142,248,0.12)', border: 'rgba(61,142,248,0.3)', color: 'var(--accent-blue)' },
                 { label: '投信',   value: todayTrust,   bg: 'rgba(255,140,66,0.12)', border: 'rgba(255,140,66,0.3)', color: 'var(--accent-orange)' },
                 { label: '自營商', value: todayDealer,  bg: 'rgba(155,89,182,0.12)', border: 'rgba(155,89,182,0.3)', color: 'var(--accent-purple)' },
               ].map(({ label, value, bg, border, color }) => (
-                <div key={label} className="flex flex-col items-center justify-center rounded-xl py-4 gap-1"
-                  style={{ backgroundColor: bg, border: `1px solid ${border}` }}>
+                <div key={label}
+                  className="flex flex-col items-center justify-center rounded-xl py-3 gap-1"
+                  style={{ backgroundColor: bg, border: `1px solid ${border}`, minWidth: 0, overflow: 'hidden' }}>
                   <span className="text-xs font-semibold" style={{ color }}>{label}</span>
-                  <span className="num text-lg font-bold"
-                    style={{ color: value >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+                  <span
+                    className="num font-bold text-center"
+                    style={{
+                      fontSize: 'clamp(10px, 2.8vw, 18px)',
+                      color: value >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
+                      wordBreak: 'break-all',
+                      lineHeight: 1.2,
+                      padding: '0 4px',
+                    }}>
                     {value >= 0 ? '+' : ''}{formatNTD(Math.abs(value) * 1000)}
                   </span>
                 </div>
@@ -292,10 +302,12 @@ export default function InstitutionalClient() {
           )
         }
 
+        {/* ── Ad slot — below market summary totals ──────────────────────── */}
         <div className="flex justify-center">
           <AdSlot size="leaderboard" slotId="institutional-top" />
         </div>
 
+        {/* ── 30-day trend chart ─────────────────────────────────────────── */}
         <Card>
           <p className="mb-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
             近30日三大法人買賣超趨勢
@@ -333,6 +345,7 @@ export default function InstitutionalClient() {
           }
         </Card>
 
+        {/* ── Main tabs ──────────────────────────────────────────────────── */}
         <Card className="p-0">
           <div className="px-4 pt-4">
             <Tabs tabs={MAIN_TABS} activeTab={activeTab} onChange={setActiveTab} />
@@ -343,11 +356,11 @@ export default function InstitutionalClient() {
             {activeTab === 'foreign' && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div>
-                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-red)' }}>▲ 外資買超排行 TOP 20</p>
+                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-green)' }}>▲ 外資買超排行 TOP 20</p>
                   <FlowTable rows={fbuyRes?.data ?? []} columns={foreignBuyColumns} isLoading={fbuyLoading} />
                 </div>
                 <div>
-                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-green)' }}>▼ 外資賣超排行 TOP 20</p>
+                  <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-red)' }}>▼ 外資賣超排行 TOP 20</p>
                   <FlowTable rows={fsellRes?.data ?? []} columns={foreignSellColumns} isLoading={fsellLoading} />
                 </div>
               </div>
@@ -355,7 +368,7 @@ export default function InstitutionalClient() {
 
             {activeTab === 'trust' && (
               <div>
-                <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-red)' }}>▲ 投信買超排行 TOP 20</p>
+                <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--accent-orange)' }}>▲ 投信買超排行 TOP 20</p>
                 <FlowTable rows={trustRes?.data ?? []} columns={trustColumns} isLoading={trustLoading} />
               </div>
             )}
@@ -379,9 +392,9 @@ export default function InstitutionalClient() {
                       onClick={() => setConsecDays(opt.value)}
                       className="rounded-full px-4 py-1.5 text-xs font-medium transition-colors duration-100"
                       style={{
-                        backgroundColor: consecDays === opt.value ? 'var(--accent-red)' : 'transparent',
-                        color: consecDays === opt.value ? '#fff' : 'var(--text-secondary)',
-                        border: `1px solid ${consecDays === opt.value ? 'var(--accent-red)' : 'var(--border)'}`,
+                        backgroundColor: consecDays === opt.value ? 'var(--accent-green)' : 'transparent',
+                        color: consecDays === opt.value ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                        border: `1px solid ${consecDays === opt.value ? 'var(--accent-green)' : 'var(--border)'}`,
                       }}
                     >
                       {opt.label}
