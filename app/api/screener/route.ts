@@ -12,6 +12,9 @@ const ALLOWED_SORT = new Set([
   'margin_change', 'foreign_net',
 ]);
 
+// Computed market cap expression (in 億 NTD)
+const MARKET_CAP_EXPR = `COALESCE(f.market_cap, (s.shares_outstanding * dp.close / 100000000.0))`;
+
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
 
@@ -38,8 +41,8 @@ export async function GET(req: NextRequest) {
   addNum('dp.change_pct',       p.get('change_pct_min'), '>=');
   addNum('dp.change_pct',       p.get('change_pct_max'), '<=');
   addNum('dp.volume',           p.get('volume_min'),     '>=');
-  addNum('f.market_cap',        p.get('market_cap_min'), '>=');
-  addNum('f.market_cap',        p.get('market_cap_max'), '<=');
+  addNum(MARKET_CAP_EXPR,       p.get('market_cap_min'), '>=');
+  addNum(MARKET_CAP_EXPR,       p.get('market_cap_max'), '<=');
   addNum('f.pe_ratio',          p.get('pe_ratio_min'),   '>=');
   addNum('f.pe_ratio',          p.get('pe_ratio_max'),   '<=');
   addNum('f.pb_ratio',          p.get('pb_ratio_min'),   '>=');
@@ -75,7 +78,7 @@ export async function GET(req: NextRequest) {
     change_pct:     'dp.change_pct',
     close:          'dp.close',
     volume:         'dp.volume',
-    market_cap:     'f.market_cap',
+    market_cap:     MARKET_CAP_EXPR,
     pe_ratio:       'f.pe_ratio',
     pb_ratio:       'f.pb_ratio',
     dividend_yield: 'ds.latest_yield_pct',
@@ -116,7 +119,8 @@ export async function GET(req: NextRequest) {
       SELECT
         s.symbol, s.name_zh, s.sector, s.market,
         dp.close, dp.change_pct, dp.volume, dp.open, dp.high, dp.low,
-        f.pe_ratio, f.pb_ratio, f.market_cap,
+        f.pe_ratio, f.pb_ratio,
+        ${MARKET_CAP_EXPR} AS market_cap,
         f.eps, f.roe, f.roa, f.gross_margin, f.net_margin,
         f.revenue_growth_yoy, f.eps_growth_yoy, f.debt_ratio,
         ds.latest_yield_pct  AS dividend_yield,
