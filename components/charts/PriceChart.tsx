@@ -5,7 +5,6 @@ import {
   ComposedChart, Line, Bar,
   XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
-  TooltipProps,
 } from 'recharts';
 import { subDays, subMonths, parseISO, isAfter } from 'date-fns';
 
@@ -43,7 +42,6 @@ function getCutoff(range: Range): Date {
   }
 }
 
-// How often to show an x-axis tick based on range
 function tickInterval(range: Range, total: number): number {
   if (range === '1W') return 1;
   if (range === '1M') return Math.max(1, Math.floor(total / 6));
@@ -63,8 +61,12 @@ function formatDate(dateStr: string, range: Range): string {
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
-const close  = payload.find((p: any) => p.dataKey === 'close')?.value;
-const volume = payload.find((p: any) => p.dataKey === 'volume')?.value;
+  const close  = payload.find((p: any) => p.dataKey === 'close')?.value;
+  const volume = payload.find((p: any) => p.dataKey === 'volume')?.value;
+
+  // Don't render if nothing meaningful to show
+  if (close == null && volume == null) return null;
+
   return (
     <div
       className="rounded px-3 py-2 text-xs shadow-lg"
@@ -75,18 +77,22 @@ const volume = payload.find((p: any) => p.dataKey === 'volume')?.value;
       }}
     >
       <div style={{ color: 'var(--text-muted)' }} className="mb-1">{label}</div>
-      <div>
-        收盤：
-        <span className="num font-semibold" style={{ color: 'var(--accent-green)' }}>
-          NT${Number(close ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </span>
-      </div>
-      <div>
-        成交量：
-        <span className="num" style={{ color: 'var(--accent-blue)' }}>
-          {Number(volume ?? 0).toLocaleString('en-US')} 張
-        </span>
-      </div>
+      {close != null && (
+        <div>
+          收盤：
+          <span className="num font-semibold" style={{ color: 'var(--accent-green)' }}>
+            NT${Number(close).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+      )}
+      {volume != null && (
+        <div>
+          成交量：
+          <span className="num" style={{ color: 'var(--accent-blue)' }}>
+            {Number(volume).toLocaleString('en-US')} 張
+          </span>
+        </div>
+      )}
     </div>
   );
 }
