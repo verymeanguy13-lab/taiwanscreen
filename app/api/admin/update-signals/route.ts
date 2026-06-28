@@ -125,7 +125,7 @@ export async function POST() {
             `UPDATE signal_results
              SET ${col} = $1, ${retCol} = $2, ${upCol} = $3
              WHERE id = $4`,
-            [futurePrice, Math.round(ret * 10000) / 10000, ret > 3, row.id],
+            [futurePrice, Math.round(ret * 10000) / 10000, ret > 0, row.id],
           );
           if (days === 5)  updated5d++;
           if (days === 10) updated10d++;
