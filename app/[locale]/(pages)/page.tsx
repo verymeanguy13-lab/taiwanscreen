@@ -281,7 +281,7 @@ function ScannerSection() {
 // ── Accuracy Teaser Section ───────────────────────────────────────────────────
 
 function AccuracyTeaserSection() {
-  const { data, isLoading } = useSWR('/api/kline/accuracy?limit=3', fetcher, {
+  const { data, isLoading } = useSWR('/api/kline/accuracy?period=5d&limit=3', fetcher, {
     revalidateOnFocus: false, shouldRetryOnError: false,
   });
 
@@ -315,7 +315,7 @@ function AccuracyTeaserSection() {
               <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                 {[
                   { label: '條件後上漲比例', value: `${priceUpRate}%`, color: priceUpRate >= 50 ? 'var(--accent-red)' : 'var(--accent-green)' },
-                  { label: '平均10日報酬',   value: `${avgReturn >= 0 ? '+' : ''}${avgReturn}%`, color: avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
+                  { label: '平均5日報酬',   value: `${avgReturn >= 0 ? '+' : ''}${avgReturn}%`, color: avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
                   { label: '累計訊號次數',   value: total.toLocaleString(), color: 'var(--text-primary)' },
                 ].map(({ label, value, color }) => (
                   <div key={label}>
