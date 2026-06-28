@@ -25,9 +25,9 @@ export function Tabs({ tabs, activeTab, onChange }: TabsProps) {
             onClick={() => onChange(value)}
             className="relative shrink-0 px-4 py-2.5 text-sm font-medium transition-colors duration-150 focus:outline-none"
             style={{
-              color: isActive ? 'var(--accent-green)' : 'var(--text-secondary)',
+              color: isActive ? 'var(--accent-red)' : 'var(--text-secondary)',
               borderBottom: isActive
-                ? '2px solid var(--accent-green)'
+                ? '2px solid var(--accent-red)'
                 : '2px solid transparent',
               marginBottom: '-1px',
             }}
