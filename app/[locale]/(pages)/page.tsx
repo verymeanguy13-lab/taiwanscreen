@@ -281,7 +281,7 @@ function ScannerSection() {
 // ── Accuracy Teaser Section ───────────────────────────────────────────────────
 
 function AccuracyTeaserSection() {
-  const { data, isLoading } = useSWR('/api/kline/accuracy?period=10d&limit=3', fetcher, {
+  const { data, isLoading } = useSWR('/api/kline/accuracy?limit=3', fetcher, {
     revalidateOnFocus: false, shouldRetryOnError: false,
   });
 
