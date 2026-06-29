@@ -24,8 +24,8 @@ interface Props {
 
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
-  const revenue    = payload.find((p: any) => p.dataKey === 'revenue')?.value ?? 0;
-  const growth_yoy = payload.find((p: any) => p.dataKey === 'growth_yoy')?.value ?? 0;
+  const revenue    = payload.find((p: any) => p.dataKey === 'revenue')?.value;
+  const growth_yoy = payload.find((p: any) => p.dataKey === 'growth_yoy')?.value;
   return (
     <div
       className="rounded-lg px-3 py-2 text-xs shadow-lg"
@@ -36,10 +36,14 @@ function CustomTooltip({ active, payload, label }: any) {
       }}
     >
       <p className="mb-1 font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</p>
-      <p>營收：<span className="num font-semibold">NT${(revenue / 1e8).toFixed(1)}億</span></p>
-      <p style={{ color: growth_yoy >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-        年增率：<span className="num font-semibold">{growth_yoy >= 0 ? '+' : ''}{growth_yoy.toFixed(1)}%</span>
-      </p>
+      {revenue != null && (
+        <p>營收：<span className="num font-semibold">NT${(Number(revenue) / 1e8).toFixed(1)}億</span></p>
+      )}
+      {growth_yoy != null && growth_yoy !== 0 && (
+        <p style={{ color: Number(growth_yoy) >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+          年增率：<span className="num font-semibold">{Number(growth_yoy) >= 0 ? '+' : ''}{Number(growth_yoy).toFixed(1)}%</span>
+        </p>
+      )}
     </div>
   );
 }
@@ -88,13 +92,14 @@ export function RevenueChart({ data }: Props) {
             radius={[3, 3, 0, 0]}
             opacity={0.85}
           />
+          {/* Taiwan convention: positive growth = bullish = red */}
           <Line
             yAxisId="growth"
             dataKey="growth_yoy"
             type="monotone"
-            stroke="var(--accent-green)"
+            stroke="var(--accent-red)"
             strokeWidth={2}
-            dot={{ r: 3, fill: 'var(--accent-green)' }}
+            dot={{ r: 3, fill: 'var(--accent-red)' }}
           />
         </ComposedChart>
       </ResponsiveContainer>
