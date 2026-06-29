@@ -43,7 +43,8 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
   });
 
   const finalReturn = cumulData[cumulData.length - 1]?.cumulative ?? 0;
-  const lineColor   = finalReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+  // Taiwan convention: positive return = bullish = red, negative = bearish = green
+  const lineColor = finalReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)';
 
   // ── Monthly win rate ──────────────────────────────────────────────────────
   const monthlyFiltered = signalType === 'all'
@@ -74,7 +75,6 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
     );
   }
 
-  // Deduplicate by date for X-axis (250 signals but only ~10 unique dates)
   const dateData = Array.from(
     cumulData.reduce((map, row) => {
       map.set(row.date, row);
@@ -93,9 +93,10 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
           </span>
           <span style={{
             fontSize: 13, fontWeight: 700,
-            color: finalReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+            // Taiwan convention: positive = red, negative = green
+            color: finalReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
             padding: '2px 10px', borderRadius: 8,
-            backgroundColor: finalReturn >= 0 ? 'rgba(0,212,170,0.12)' : 'rgba(255,77,109,0.12)',
+            backgroundColor: finalReturn >= 0 ? 'rgba(255,77,109,0.12)' : 'rgba(0,212,170,0.12)',
           }}>
             {finalReturn >= 0 ? '+' : ''}{finalReturn.toFixed(2)}%
           </span>
@@ -154,7 +155,8 @@ export function AccuracyChart({ signals, monthlyTrend, period, signalType }: Acc
                   return [`${up}次上漲 / ${total}次 = ${rate}%`, '勝率'];
                 }}
               />
-              <Bar dataKey="rate" radius={[4, 4, 0, 0]} fill="var(--accent-green)" />
+              {/* Taiwan convention: bullish bar = red */}
+              <Bar dataKey="rate" radius={[4, 4, 0, 0]} fill="var(--accent-red)" />
             </BarChart>
           </ResponsiveContainer>
         </div>

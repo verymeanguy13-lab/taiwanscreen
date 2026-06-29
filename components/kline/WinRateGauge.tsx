@@ -27,10 +27,11 @@ export function WinRateGauge({
   const CIRCUM = 2 * Math.PI * R;
   const arc    = (Math.min(priceUpRate, 100) / 100) * CIRCUM;
 
+  // Taiwan convention: high win rate = bullish = red, low = bearish = green
   const color =
-    priceUpRate >= 60 ? 'var(--accent-green)' :
+    priceUpRate >= 60 ? 'var(--accent-red)'   :
     priceUpRate >= 50 ? 'var(--accent-gold)'  :
-                        'var(--accent-red)';
+                        'var(--accent-green)';
 
   return (
     <button
