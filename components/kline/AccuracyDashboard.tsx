@@ -34,7 +34,7 @@ const CARD: React.CSSProperties = {
 };
 
 export function AccuracyDashboard() {
-  const [period,       setPeriod]   = useState<'5d' | '10d' | '20d'>('10d');
+  const [period,       setPeriod]   = useState<'5d' | '10d' | '20d'>('5d');
   const [signalType,   setType]     = useState('all');
   const [winFilter,    setWinFilter]= useState<WinFilter>('全部');
   const [visibleCount, setVisible]  = useState(20);
@@ -67,8 +67,9 @@ export function AccuracyDashboard() {
     });
   }, [recentSignals, winFilter, period]);
 
+  // Taiwan convention: high win rate = bullish = red, low = bearish = green
   const statColor = (v: number) =>
-    v >= 60 ? 'var(--accent-green)' : v >= 50 ? 'var(--accent-gold)' : 'var(--accent-red)';
+    v >= 60 ? 'var(--accent-red)' : v >= 50 ? 'var(--accent-gold)' : 'var(--accent-green)';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -86,7 +87,7 @@ export function AccuracyDashboard() {
               {[
                 { label: '總訊號次數',        value: summary.totalSignals.toLocaleString(), color: 'var(--text-primary)' },
                 { label: '技術條件後上漲比例', value: `${summary.priceUpRate}%`,             color: statColor(summary.priceUpRate) },
-                { label: '平均報酬',          value: `${summary.avgReturn >= 0 ? '+' : ''}${summary.avgReturn}%`, color: summary.avgReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' },
+                { label: '平均報酬',          value: `${summary.avgReturn >= 0 ? '+' : ''}${summary.avgReturn}%`, color: summary.avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
                 { label: '最佳訊號類型',      value: summary.bestSignalType,                color: 'var(--accent-gold)' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -136,9 +137,9 @@ export function AccuracyDashboard() {
               <button key={p} onClick={() => setPeriod(p as any)}
                 style={{
                   fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                  backgroundColor: period === p ? 'var(--accent-green)' : 'transparent',
-                  color:           period === p ? 'var(--bg-primary)'   : 'var(--text-secondary)',
-                  border: `1px solid ${period === p ? 'var(--accent-green)' : 'var(--border)'}`,
+                  backgroundColor: period === p ? 'var(--accent-red)' : 'transparent',
+                  color:           period === p ? '#fff'              : 'var(--text-secondary)',
+                  border: `1px solid ${period === p ? 'var(--accent-red)' : 'var(--border)'}`,
                 }}>
                 {label}
               </button>
