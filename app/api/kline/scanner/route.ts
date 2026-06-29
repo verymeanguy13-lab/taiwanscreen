@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
          AND dp.date = (SELECT MAX(date) FROM daily_prices LIMIT 1)
        WHERE sr.signal_date = $1
        AND sr.confidence >= 50
+       AND sr.signal_type NOT IN ('近十日強勢股', '__sentinel__')
        ORDER BY sr.confidence DESC`,
       [latestDate],
     );
