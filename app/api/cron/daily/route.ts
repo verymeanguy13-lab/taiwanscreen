@@ -84,7 +84,6 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
             const close      = clean(row[8]);
             if (!close || close <= 0) continue;
 
-            // row[9] may be HTML like <p style= color:green>-</p>
             const direction  = String(row[9] ?? '').trim();
             const sign       = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
             const change_amt = sign * clean(row[10]);
@@ -182,8 +181,11 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
 }
 
 export async function GET(req: NextRequest) {
+  // ── Auth: allow Vercel cron trigger OR manual call with secret ─────────────
   const secret = req.headers.get('x-cron-secret');
-  if (secret !== process.env.CRON_SECRET) {
+  const isVercelCron = req.headers.get('x-vercel-cron') === '1';
+
+  if (!isVercelCron && secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -201,7 +203,7 @@ export async function GET(req: NextRequest) {
   const allErrors: string[] = [];
   const backfillResults: Record<string, number> = {};
 
-  // ── Self-healing: check for missing recent days and backfill ─────────────
+  // ── Self-healing: check for missing recent days and backfill ──────────────
   const recentDays = pastBusinessDays(3);
   const [latestPrice] = await sql`SELECT MAX(date) as d FROM daily_prices`;
   const latestPriceDate = latestPrice?.d ? String(latestPrice.d).slice(0, 10) : null;
