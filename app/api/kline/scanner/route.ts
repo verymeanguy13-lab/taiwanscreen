@@ -26,15 +26,15 @@ export async function GET(req: NextRequest) {
     }
 
     const rows = await queryUnsafe<{
-      symbol:       string;
-      name_zh:      string;
-      sector:       string;
-      signal_type:  string;
-      entry_price:  number;
-      confidence:   number;
-      close:        number;
-      prev_close:   number;
-      volume:       number;
+      symbol:      string;
+      name_zh:     string;
+      sector:      string;
+      signal_type: string;
+      entry_price: number;
+      confidence:  number;
+      close:       number;
+      change_pct:  number;
+      volume:      number;
     }>(
       `SELECT
          sr.symbol,
@@ -44,22 +44,13 @@ export async function GET(req: NextRequest) {
          sr.entry_price,
          sr.confidence,
          dp.close,
-         dp_prev.close AS prev_close,
+         dp.change_pct,
          dp.volume
        FROM signal_results sr
        JOIN stocks s ON s.symbol = sr.symbol
-       LEFT JOIN daily_prices dp
+       JOIN daily_prices dp
          ON dp.symbol = sr.symbol
-         AND dp.date = (
-           SELECT MAX(date) FROM daily_prices WHERE symbol = sr.symbol
-         )
-       LEFT JOIN daily_prices dp_prev
-         ON dp_prev.symbol = sr.symbol
-         AND dp_prev.date = (
-           SELECT MAX(date) FROM daily_prices
-           WHERE symbol = sr.symbol
-           AND date < (SELECT MAX(date) FROM daily_prices WHERE symbol = sr.symbol)
-         )
+         AND dp.date = (SELECT MAX(date) FROM daily_prices LIMIT 1)
        WHERE sr.signal_date = $1
        AND sr.confidence >= 50
        ORDER BY sr.confidence DESC`,
@@ -84,6 +75,7 @@ export async function GET(req: NextRequest) {
       '近五日強勢股': '上漲趨勢突破',
     };
 
+    // Deduplicate: keep highest confidence signal per symbol
     const symbolMap = new Map<string, typeof rows[0]>();
     for (const row of rows) {
       const existing = symbolMap.get(row.symbol);
@@ -97,26 +89,18 @@ export async function GET(req: NextRequest) {
       filtered = filtered.filter(r => r.sector === industry);
     }
 
-    const results = filtered.map(r => {
-      const close     = Number(r.close)      || Number(r.entry_price) || 0;
-      const prevClose = Number(r.prev_close) || 0;
-      const changePercent = prevClose > 0
-        ? Math.round(((close - prevClose) / prevClose) * 10000) / 100
-        : 0;
-
-      return {
-        symbol:       r.symbol,
-        name_zh:      r.name_zh,
-        sector:       r.sector,
-        breakoutType: SIGNAL_TO_BREAKOUT[r.signal_type] ?? '上漲趨勢突破',
-        signalLabel:  r.signal_type,
-        confidence:   Number(r.confidence) || 50,
-        matrixScore:  Number(r.confidence) || 50,
-        price:        close,
-        changePercent,
-        volume:       Number(r.volume) || 0,
-      };
-    });
+    const results = filtered.map(r => ({
+      symbol:        r.symbol,
+      name_zh:       r.name_zh,
+      sector:        r.sector,
+      breakoutType:  SIGNAL_TO_BREAKOUT[r.signal_type] ?? '上漲趨勢突破',
+      signalLabel:   r.signal_type,
+      confidence:    Number(r.confidence) || 50,
+      matrixScore:   Number(r.confidence) || 50,
+      price:         Number(r.close) || Number(r.entry_price) || 0,
+      changePercent: Number(r.change_pct) || 0,
+      volume:        Number(r.volume) || 0,
+    }));
 
     results.sort((a, b) => b.confidence - a.confidence);
 
