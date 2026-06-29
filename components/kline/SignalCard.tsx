@@ -36,7 +36,8 @@ export function SignalCard({ signal, period }: SignalCardProps) {
     period === '10d' ? signal.price_up_10d :
                        signal.price_up_20d;
 
-  const retColor  = ret === null ? 'var(--text-muted)' : ret >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+  // Taiwan convention: red = up (bullish), green = down (bearish)
+  const retColor  = ret === null ? 'var(--text-muted)' : ret >= 0 ? 'var(--accent-red)' : 'var(--accent-green)';
   const chipColor = SIGNAL_COLORS[signal.signal_type] ?? 'var(--text-secondary)';
 
   return (
@@ -103,9 +104,9 @@ export function SignalCard({ signal, period }: SignalCardProps) {
           {priceUp !== null && (
             <span style={{
               fontSize: 11, fontWeight: 600,
-              color:           priceUp ? 'var(--accent-green)' : 'var(--accent-red)',
-              backgroundColor: priceUp ? 'rgba(0,212,170,0.12)' : 'rgba(255,77,109,0.12)',
-              border:          priceUp ? '1px solid rgba(0,212,170,0.3)' : '1px solid rgba(255,77,109,0.3)',
+              color:           priceUp ? 'var(--accent-red)'     : 'var(--accent-green)',
+              backgroundColor: priceUp ? 'rgba(255,77,109,0.12)' : 'rgba(0,212,170,0.12)',
+              border:          priceUp ? '1px solid rgba(255,77,109,0.3)' : '1px solid rgba(0,212,170,0.3)',
               borderRadius: 4, padding: '1px 8px',
             }}>
               {priceUp ? '▲ 上漲' : '▼ 下跌'}
@@ -126,8 +127,8 @@ export function SignalCard({ signal, period }: SignalCardProps) {
               height: '100%', borderRadius: 2,
               width: `${signal.confidence}%`,
               backgroundColor:
-                signal.confidence >= 70 ? 'var(--accent-green)' :
-                signal.confidence >= 50 ? 'var(--accent-gold)'  : 'var(--accent-red)',
+                signal.confidence >= 70 ? 'var(--accent-red)'   :
+                signal.confidence >= 50 ? 'var(--accent-gold)'  : 'var(--accent-green)',
               transition: 'width 0.4s ease',
             }} />
           </div>
