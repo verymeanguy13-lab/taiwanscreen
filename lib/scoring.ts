@@ -123,9 +123,12 @@ export function computeScore(
   if (today.close > today.open)                { trendScore += 10; trendReasons.push('今日上漲'); }
 
   // Bearish deductions — active penalties for bad structure
-  if (m5Now !== null && today.close < m5Now)  { trendScore -= 15; trendReasons.push('價<5MA'); }
-  if (m5Now !== null && m20Now !== null && m5Now < m20Now)   { trendScore -= 20; trendReasons.push('5MA<20MA'); }
-  if (m20Now !== null && m60Now !== null && m20Now < m60Now) { trendScore -= 15; trendReasons.push('20MA<60MA'); }
+  // Capped at -20 total so a correcting stock isn't scored as dead
+  let trendDeductions = 0;
+  if (m5Now !== null && today.close < m5Now)  { trendDeductions += 15; trendReasons.push('價<5MA'); }
+  if (m5Now !== null && m20Now !== null && m5Now < m20Now)   { trendDeductions += 20; trendReasons.push('5MA<20MA'); }
+  if (m20Now !== null && m60Now !== null && m20Now < m60Now) { trendDeductions += 15; trendReasons.push('20MA<60MA'); }
+  trendScore -= Math.min(trendDeductions, 20);
 
   // ------------------------------------------------------------------
   // MOMENTUM (0–100, weight 20%)
