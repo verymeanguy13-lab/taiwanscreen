@@ -122,8 +122,8 @@ export function computeScore(
   if (m60Now !== null && today.close > m60Now) { trendScore += 10; trendReasons.push('價>60MA'); }
   if (today.close > today.open)                { trendScore += 10; trendReasons.push('今日上漲'); }
 
-  // Bearish deductions — active penalties for bad structure
-  // Capped at -20 total so a correcting stock isn't scored as dead
+  // Bearish deductions — capped at -20 total so a correcting stock
+  // isn't scored as dead. A stock below MAs is weak, not worthless.
   let trendDeductions = 0;
   if (m5Now !== null && today.close < m5Now)  { trendDeductions += 15; trendReasons.push('價<5MA'); }
   if (m5Now !== null && m20Now !== null && m5Now < m20Now)   { trendDeductions += 20; trendReasons.push('5MA<20MA'); }
@@ -225,7 +225,6 @@ export function computeScore(
     } else if (allForeignNeg) {
       chipsScore -= 25; chipsReasons.push('外資連賣3日');
     } else if (foreignToday < 0) {
-      // Single day sell — minor deduction only, not a trend signal
       chipsScore -= 5; chipsReasons.push('外資今日賣超');
     }
 
@@ -264,8 +263,13 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // PATTERN (0–100, weight 10%)
+  // FIX: Each pattern type contributes a FIXED point value, not
+  // confidence × multiplier. This prevents a single pattern from
+  // inflating the score to 100 on its own.
+  // Cap: bullish patterns max +60 total, bearish max -40 total.
+  // Breakout signals are worth +25 (meaningful but not overwhelming).
   // ------------------------------------------------------------------
-  let patternScore = 0;
+  let patternScore = 40; // neutral baseline
   const patReasons: string[] = [];
 
   const patterns = detectPatterns(candles);
@@ -273,45 +277,115 @@ export function computeScore(
     sma5, sma20, sma60, rsi14, macd: macdData,
   });
 
+  // Fixed point values per pattern type — confidence is shown to user
+  // but does NOT multiply the score contribution.
+  const PATTERN_POINTS: Record<string, number> = {
+    // Strong bullish (these are rare and meaningful)
+    '紅三兵':   20,
+    '孤島晨星': 20,
+    '晨星':     15,
+    '多頭吞噬': 12,
+    '低檔長紅': 12,
+    // Moderate bullish
+    '錘子線':   8,
+    '一星二陽': 8,
+    '圓形底':   10,
+    '孕線':     5,
+    '長下影線': 5,
+    // Neutral
+    '十字星':   0,
+    // Bearish
+    '夜星':    -15,
+    '黑三兵':  -20,
+    '空頭吞噬':-12,
+    '倒錘子線': -5,
+  };
+
+  let bullishPoints = 0;
+  let bearishPoints = 0;
+
   for (const p of patterns) {
-    if (p.type === 'bullish')  { patternScore += p.confidence * 0.5; patReasons.push(`+${p.name}`); }
-    if (p.type === 'bearish')  { patternScore -= p.confidence * 0.4; patReasons.push(`-${p.name}`); }
+    const pts = PATTERN_POINTS[p.name] ?? 0;
+    if (pts > 0) {
+      bullishPoints += pts;
+      patReasons.push(`+${p.name}`);
+    } else if (pts < 0) {
+      bearishPoints += Math.abs(pts);
+      patReasons.push(`-${p.name}`);
+    }
   }
 
-  // Breakout bonus
-  const strongBreakout = breakouts.find((b) => b.confidence > 70);
-  if (strongBreakout) { patternScore += 40; patReasons.push(`突破訊號(${strongBreakout.type})`); }
+  // Cap contributions to prevent stacking
+  patternScore += Math.min(bullishPoints, 50);
+  patternScore -= Math.min(bearishPoints, 40);
 
-  // Signal matrix strength bonus
+  // Breakout bonus — a confirmed breakout is worth +20
+  const strongBreakout = breakouts.find((b) => b.confidence > 70);
+  if (strongBreakout) {
+    patternScore += 20;
+    patReasons.push(`突破訊號(${strongBreakout.type})`);
+  }
+
+  // Signal matrix strength bonus — only if genuinely strong
   const matrix = evaluateSignalMatrix(candles, indicatorSnapshot, institutional);
-  if (matrix.strengthCount >= 6) { patternScore += 25; patReasons.push(`強勢指標${matrix.strengthCount}/9`); }
+  if (matrix.strengthCount >= 6) {
+    patternScore += 15;
+    patReasons.push(`強勢指標${matrix.strengthCount}/9`);
+  }
 
   // ------------------------------------------------------------------
   // SENTIMENT (0–100, weight 5%)
+  // FIX: Sentiment should reflect edge cases, not normal stock behaviour.
+  // Baseline is 40. Points are added for genuinely good conditions
+  // and subtracted for bad ones. Most normal stocks will score 40-60,
+  // not 100.
   // ------------------------------------------------------------------
-  let sentimentScore = 0;
+  let sentimentScore = 40; // neutral baseline
   const sentReasons: string[] = [];
 
-  // RSI ideal zone (not overbought/oversold)
   if (rsiNow !== null) {
-    if (rsiNow >= 40 && rsiNow <= 65)   { sentimentScore += 30; sentReasons.push('RSI健康區'); }
-    else if (rsiNow > 75)               { sentimentScore += 0;  sentReasons.push('RSI過熱'); }
-    else                                { sentimentScore += 20; sentReasons.push('RSI中性'); }
+    if (rsiNow >= 40 && rsiNow <= 65) {
+      sentimentScore += 20; sentReasons.push('RSI健康區');
+    } else if (rsiNow > 75) {
+      sentimentScore -= 15; sentReasons.push('RSI過熱');
+    } else if (rsiNow < 30) {
+      sentimentScore -= 20; sentReasons.push('RSI超賣');
+    } else {
+      sentReasons.push('RSI中性');
+    }
   }
 
-  // Not overbought (below upper BB)
+  // Not touching upper BB (not overextended)
   const bbUpper = last(bbData.upper) as number | null;
-  if (bbUpper !== null && today.close <= bbUpper) { sentimentScore += 20; sentReasons.push('未觸布林上軌'); }
+  const bbLower = last(bbData.lower) as number | null;
+  if (bbUpper !== null && today.close > bbUpper) {
+    sentimentScore -= 10; sentReasons.push('觸及布林上軌(過熱)');
+  } else if (bbUpper !== null) {
+    sentimentScore += 10; sentReasons.push('未觸布林上軌');
+  }
 
-  // No recent bearish patterns in last 3 candles
+  // Near lower BB (oversold territory)
+  if (bbLower !== null && today.close < bbLower) {
+    sentimentScore -= 15; sentReasons.push('跌破布林下軌');
+  }
+
+  // Recent bearish patterns in last 3 candles — meaningful negative signal
   const recentBear = patterns.filter((p) => p.type === 'bearish' && p.candleIndex >= n - 3);
-  if (recentBear.length === 0) { sentimentScore += 25; sentReasons.push('近期無空頭型態'); }
+  if (recentBear.length > 0) {
+    sentimentScore -= 15; sentReasons.push(`近期空頭型態(${recentBear.map(p => p.name).join('/')})`);
+  } else {
+    sentimentScore += 10; sentReasons.push('近期無空頭型態');
+  }
 
-  // Stable volume (not extreme swings)
+  // Stable volume — only add points if genuinely stable, not just "not extreme"
   const vol3    = candles.slice(Math.max(0, n - 3)).map((c) => c.volume ?? 0);
   const volMean = vol3.reduce((s, v) => s + v, 0) / (vol3.length || 1);
   const volStd  = Math.sqrt(vol3.reduce((s, v) => s + (v - volMean) ** 2, 0) / (vol3.length || 1));
-  if (volMean > 0 && volStd / volMean < 0.5) { sentimentScore += 25; sentReasons.push('量能穩定'); }
+  if (volMean > 0 && volStd / volMean < 0.3) {
+    sentimentScore += 15; sentReasons.push('量能穩定');
+  } else if (volMean > 0 && volStd / volMean > 0.8) {
+    sentimentScore -= 10; sentReasons.push('量能不穩');
+  }
 
   // ------------------------------------------------------------------
   // Composite score
@@ -344,7 +418,7 @@ export function computeScore(
     dimensions: {
       trend:     { score: clamp(trendScore),     reason: trendReasons.join('，') || '趨勢不明' },
       momentum:  { score: clamp(momentumScore),  reason: momReasons.join('，')   || '動能偏弱' },
-      volume:    { score: clamp(volumeScore),    reason: volReasons.join('，')   || '量能普通' },
+      volume:    { score: clamp(volumeScore),     reason: volReasons.join('，')   || '量能普通' },
       chips:     { score: clamp(chipsScore),     reason: chipsReasons.join('，') || '籌碼無明顯動向' },
       pattern:   { score: clamp(patternScore),   reason: patReasons.join('，')   || '無明顯型態' },
       sentiment: { score: clamp(sentimentScore), reason: sentReasons.join('，')  || '情緒中性' },
@@ -395,8 +469,6 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const warnings:  string[] = [];
 
   // Profitability (0–100)
-  // pe_ratio and roe are not yet in DB — score from gross_margin + net_margin.
-  // When those columns are populated later, add them back here.
   let profitability = 0;
   if (input.roe !== null) {
     if (input.roe >= 20)      { profitability += 40; strengths.push('ROE優異(≥20%)'); }
@@ -425,21 +497,19 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   // Growth (0–100)
   let growth = 0;
   if (input.revenue_growth_yoy !== null) {
-    if (input.revenue_growth_yoy >= 20)  { growth += 50; strengths.push('營收高速成長'); }
+    if (input.revenue_growth_yoy >= 20)      { growth += 50; strengths.push('營收高速成長'); }
     else if (input.revenue_growth_yoy >= 10) { growth += 30; }
     else if (input.revenue_growth_yoy >= 0)  { growth += 15; }
     else { warnings.push('營收年減'); }
   }
   if (input.eps_growth_yoy !== null) {
-    if (input.eps_growth_yoy >= 20)  { growth += 50; strengths.push('EPS高速成長'); }
+    if (input.eps_growth_yoy >= 20)      { growth += 50; strengths.push('EPS高速成長'); }
     else if (input.eps_growth_yoy >= 10) { growth += 30; }
     else if (input.eps_growth_yoy >= 0)  { growth += 15; }
     else { warnings.push('EPS年減'); }
   }
 
   // Safety (0–100)
-  // debt_ratio and pb_ratio are not yet in DB — safety scoring uses dividend data only for now.
-  // When those columns are populated, the stubs below will activate automatically.
   let safety = 0;
   if (input.debt_ratio !== null) {
     if (input.debt_ratio <= 30)      { safety += 40; strengths.push('負債比低(≤30%)'); }
@@ -456,15 +526,15 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
     else if (input.latest_yield_pct > 0)  { safety += 10; }
   }
   if (input.consecutive_years !== null) {
-    if (input.consecutive_years >= 10)    { safety += 40; strengths.push(`連續配息${input.consecutive_years}年`); }
-    else if (input.consecutive_years >= 5){ safety += 25; strengths.push(`連續配息${input.consecutive_years}年`); }
-    else if (input.consecutive_years >= 2){ safety += 10; }
+    if (input.consecutive_years >= 10)     { safety += 40; strengths.push(`連續配息${input.consecutive_years}年`); }
+    else if (input.consecutive_years >= 5) { safety += 25; strengths.push(`連續配息${input.consecutive_years}年`); }
+    else if (input.consecutive_years >= 2) { safety += 10; }
   }
 
   // Chips (0–100)
   let chips = 0;
   if (input.foreign_consecutive_days !== null) {
-    if (input.foreign_consecutive_days >= 5)   { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
+    if (input.foreign_consecutive_days >= 5)    { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
     else if (input.foreign_consecutive_days >= 3) { chips += 30; }
     else if (input.foreign_consecutive_days <= -3) { warnings.push('外資連賣'); }
   }
