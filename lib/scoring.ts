@@ -110,15 +110,22 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // TREND (0–100, weight 25%)
+  // Baseline 40 = neutral. Points added for bullish MA structure,
+  // subtracted for bearish structure. Today's candle is a minor factor.
   // ------------------------------------------------------------------
-  let trendScore = 0;
+  let trendScore = 40;
   const trendReasons: string[] = [];
 
-  if (m5Now !== null && today.close > m5Now) { trendScore += 25; trendReasons.push('價>5MA'); }
-  if (m5Now !== null && m20Now !== null && m5Now > m20Now) { trendScore += 25; trendReasons.push('5MA>20MA'); }
-  if (m20Now !== null && m60Now !== null && m20Now > m60Now) { trendScore += 20; trendReasons.push('20MA>60MA'); }
-  if (m60Now !== null && today.close > m60Now) { trendScore += 15; trendReasons.push('價>60MA'); }
-  if (today.close > today.open) { trendScore += 15; trendReasons.push('今日上漲'); }
+  if (m5Now !== null && today.close > m5Now)  { trendScore += 15; trendReasons.push('價>5MA'); }
+  if (m5Now !== null && m20Now !== null && m5Now > m20Now)   { trendScore += 20; trendReasons.push('5MA>20MA'); }
+  if (m20Now !== null && m60Now !== null && m20Now > m60Now) { trendScore += 15; trendReasons.push('20MA>60MA'); }
+  if (m60Now !== null && today.close > m60Now) { trendScore += 10; trendReasons.push('價>60MA'); }
+  if (today.close > today.open)                { trendScore += 10; trendReasons.push('今日上漲'); }
+
+  // Bearish deductions — active penalties for bad structure
+  if (m5Now !== null && today.close < m5Now)  { trendScore -= 15; trendReasons.push('價<5MA'); }
+  if (m5Now !== null && m20Now !== null && m5Now < m20Now)   { trendScore -= 20; trendReasons.push('5MA<20MA'); }
+  if (m20Now !== null && m60Now !== null && m20Now < m60Now) { trendScore -= 15; trendReasons.push('20MA<60MA'); }
 
   // ------------------------------------------------------------------
   // MOMENTUM (0–100, weight 20%)
@@ -148,68 +155,86 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // VOLUME (0–100, weight 20%)
+  // Baseline 50 = normal healthy volume. A stock with steady normal
+  // volume is NOT weak — it is neutral. Only extremes move the score.
   // ------------------------------------------------------------------
-  let volumeScore = 0;
+  let volumeScore = 50;
   const volReasons: string[] = [];
 
   const av5 = avgVol(candles, 5, 1);
   const todayVol = today.volume ?? 0;
 
-  // Volume ratio tiers
   if (av5 > 0) {
     const vr = todayVol / av5;
-    if (vr >= 2)       { volumeScore += 40; volReasons.push(`量比${vr.toFixed(1)}x(暴增)`); }
-    else if (vr >= 1.5){ volumeScore += 30; volReasons.push(`量比${vr.toFixed(1)}x(放量)`); }
-    else if (vr >= 1)  { volumeScore += 15; volReasons.push(`量比${vr.toFixed(1)}x(正常)`); }
+    if (vr >= 2)        { volumeScore += 30; volReasons.push(`量比${vr.toFixed(1)}x(暴增)`); }
+    else if (vr >= 1.5) { volumeScore += 20; volReasons.push(`量比${vr.toFixed(1)}x(放量)`); }
+    else if (vr >= 1)   { volReasons.push(`量比${vr.toFixed(1)}x(正常)`); }
+    else if (vr < 0.5)  { volumeScore -= 20; volReasons.push(`量比${vr.toFixed(1)}x(極度萎縮)`); }
+    else if (vr < 0.8)  { volumeScore -= 10; volReasons.push(`量比${vr.toFixed(1)}x(縮量)`); }
   }
 
-  // OBV rising
+  // OBV rising = smart money accumulating
   if (obvData.length > 5 && obvData[obvData.length - 1] > obvData[obvData.length - 6]) {
-    volumeScore += 30; volReasons.push('OBV上升');
+    volumeScore += 20; volReasons.push('OBV上升');
   }
 
-  // Distribution warning: high volume + price drop
+  // Distribution warning: high volume + price drop = selling into strength
   if (av5 > 0 && todayVol > 1.5 * av5 && today.close < today.open) {
-    volumeScore -= 20; volReasons.push('出貨警告');
+    volumeScore -= 25; volReasons.push('出貨警告');
   }
+
+  // Volume completely dried up — concerning regardless of price direction
+  if (av5 > 0 && todayVol < 0.3 * av5) {
+    volumeScore -= 15; volReasons.push('量能極度萎縮');
+  }
+
+  if (volReasons.length === 0) volReasons.push('量能普通');
 
   // ------------------------------------------------------------------
   // CHIPS (0–100, weight 20%)
-  // Institutional flow is primary signal — margin/short are secondary.
-  // Max from institutional: +80. Max penalty from margin/short: ±10 each.
+  // Baseline 50 = no data or neutral institutional activity.
+  // One day of foreign selling is NOT a red flag — only persistent
+  // selling (3 consecutive days) warrants a meaningful deduction.
   // ------------------------------------------------------------------
-  let chipsScore = 0;
+  let chipsScore = 50;
   const chipsReasons: string[] = [];
 
   if (institutional && institutional.length >= 1) {
     const recent3 = institutional.slice(-3);
     const recent1 = institutional[institutional.length - 1];
 
-    const foreignNet3 = recent3.reduce((s, r) => s + Number(r.foreign_net ?? 0), 0);
-    const trustNet3   = recent3.reduce((s, r) => s + Number(r.trust_net   ?? 0), 0);
-    const allForeignPos  = recent3.length >= 3 && recent3.every((r) => Number(r.foreign_net ?? 0) > 0);
-    const allTrustPos    = recent3.length >= 3 && recent3.every((r) => Number(r.trust_net   ?? 0) > 0);
-    const anyForeignPos  = recent3.some((r) => Number(r.foreign_net ?? 0) > 0);
-    const anyTrustPos    = recent3.some((r) => Number(r.trust_net   ?? 0) > 0);
-    const foreignToday   = Number(recent1?.foreign_net ?? 0);
-    const trustToday     = Number(recent1?.trust_net   ?? 0);
+    const foreignNet3   = recent3.reduce((s, r) => s + Number(r.foreign_net ?? 0), 0);
+    const trustNet3     = recent3.reduce((s, r) => s + Number(r.trust_net   ?? 0), 0);
+    const allForeignPos = recent3.length >= 3 && recent3.every((r) => Number(r.foreign_net ?? 0) > 0);
+    const allTrustPos   = recent3.length >= 3 && recent3.every((r) => Number(r.trust_net   ?? 0) > 0);
+    const anyForeignPos = recent3.some((r) => Number(r.foreign_net ?? 0) > 0);
+    const anyTrustPos   = recent3.some((r) => Number(r.trust_net   ?? 0) > 0);
+    const allForeignNeg = recent3.every((r) => Number(r.foreign_net ?? 0) < 0);
+    const allTrustNeg   = recent3.every((r) => Number(r.trust_net   ?? 0) < 0);
+    const foreignToday  = Number(recent1?.foreign_net ?? 0);
+    const trustToday    = Number(recent1?.trust_net   ?? 0);
 
-    // Foreign institutional — primary signal (up to +50)
+    // Foreign institutional — meaningful only when persistent
     if (allForeignPos) {
-      chipsScore += 50; chipsReasons.push(`外資連買3日(+${foreignNet3})`);
+      chipsScore += 30; chipsReasons.push(`外資連買3日(+${foreignNet3})`);
     } else if (anyForeignPos) {
-      chipsScore += 25; chipsReasons.push(`外資近期買超`);
+      chipsScore += 10; chipsReasons.push('外資近期買超');
+    } else if (allForeignNeg) {
+      chipsScore -= 25; chipsReasons.push('外資連賣3日');
     } else if (foreignToday < 0) {
-      chipsScore -= 10; chipsReasons.push(`外資今日賣超`);
+      // Single day sell — minor deduction only, not a trend signal
+      chipsScore -= 5; chipsReasons.push('外資今日賣超');
     }
 
-    // Trust (investment trust) — secondary institutional (up to +30)
+    // Investment trust — secondary institutional signal
     if (allTrustPos) {
-      chipsScore += 30; chipsReasons.push(`投信連買3日(+${trustNet3})`);
+      chipsScore += 20; chipsReasons.push(`投信連買3日(+${trustNet3})`);
     } else if (anyTrustPos) {
-      chipsScore += 15; chipsReasons.push(`投信近期買超`);
+      chipsScore += 8; chipsReasons.push('投信近期買超');
+    } else if (allTrustNeg) {
+      chipsScore -= 15; chipsReasons.push('投信連賣3日');
     } else if (trustToday < 0) {
-      chipsScore -= 5; chipsReasons.push(`投信今日賣超`);
+      chipsScore -= 3; chipsReasons.push('投信今日賣超');
     }
   }
 
@@ -221,18 +246,16 @@ export function computeScore(
     const shortBal   = Number(latest.short_balance  ?? 0);
     const shortPrev  = Number(prev.short_balance    ?? 0);
 
-    // Margin signals — capped at ±10 (cannot override institutional signal)
     if (marginBal < marginPrev) {
-      chipsScore += 10; chipsReasons.push('融資餘額下降(健康)');
+      chipsScore += 8; chipsReasons.push('融資餘額下降(健康)');
     } else if (marginBal > marginPrev * 1.05) {
-      chipsScore -= 10; chipsReasons.push('融資快速增加');
+      chipsScore -= 8; chipsReasons.push('融資快速增加');
     }
 
-    // Short signals — capped at ±10
     if (shortBal > shortPrev * 1.1) {
-      chipsScore += 10; chipsReasons.push('空單增加(軋空潛力)');
+      chipsScore += 8; chipsReasons.push('空單增加(軋空潛力)');
     } else if (shortBal < shortPrev) {
-      chipsScore -= 10; chipsReasons.push('空單回補(賣壓)');
+      chipsScore -= 5; chipsReasons.push('空單回補(賣壓)');
     }
   }
 
