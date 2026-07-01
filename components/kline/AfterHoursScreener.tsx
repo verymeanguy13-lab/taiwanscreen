@@ -12,20 +12,20 @@ const BORDER     = '#1E2235';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 const BULL_STRATEGY_FILTERS = [
-  '昨日強勢股', '近五日強勢股', '近十日強勢股',
-  '開布林', '突破均線', '突破壓力', '剛轉多', '突破趨勢線',
+  '近五日強勢股', '外資連買三日', '外資連買五日',
+  '主力買超', '投信買超', '投信連買', '融資增加', '投信籌碼集中',
 ];
 
 const BEAR_STRATEGY_FILTERS = [
-  '昨日弱勢股', '近五日弱勢股', '近十日弱勢股',
-  '跌破布林', '跌破均線', '空頭排列', '剛轉空', '綠柱放大',
+  '近五日弱勢股', '外資連賣三日', '外資連賣五日',
+  '主力賣超', '空頭排列', '融券增加', '融資減少', '跌破季線',
 ];
 
 const WORKFLOW_STEPS = [
-  { step: 1, text: '盤後技術面篩選出符合條件的個股' },
-  { step: 2, text: '明日 09:00 開盤，觀察是否出現盤中訊號' },
-  { step: 3, text: '09:00–09:20 確認量能與突破位階' },
-  { step: 4, text: '本清單僅供技術面觀察，不構成買賣建議' },
+  { step: 1, text: '系統每日收盤後自動掃描全市場符合條件個股' },
+  { step: 2, text: '於 09:00 前完成昨日收盤資料建立' },
+  { step: 3, text: '09:00至9:20 開盤觀察量能是否配合訊號方向' },
+  { step: 4, text: '確認開盤方向後依據策略設定停利停損點位' },
 ];
 
 function toScanResult(r: any, side: 'bull' | 'bear'): ScanResult {
@@ -57,7 +57,7 @@ function WorkflowGuide({ count }: { count: number }) {
         style={{ width: '100%', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0F1117', cursor: 'pointer', border: 'none' }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>
-          盤後操作流程 — 共 {count} 檔符合條件
+          📋 盤後操作流程 · 共掃描到 {count} 檔個股
         </span>
         <span style={{ fontSize: 12, color: '#8B8FA8' }}>{open ? '▲' : '▼'}</span>
       </button>
@@ -136,16 +136,23 @@ export function AfterHoursScreener() {
     }
   };
 
-  const bullResults: ScanResult[] = (bullData?.results ?? [])
-    .sort((a: any, b: any) => b.confidence - a.confidence)
-    .map((r: any) => toScanResult(r, 'bull'));
+  // Keep raw results array in original order (sorted by confidence desc) so we
+  // can access r.confidence by index when passing to StockSignalCard.
+  const rawBullResults: any[] = (bullData?.results ?? [])
+    .sort((a: any, b: any) => b.confidence - a.confidence);
 
-  const bearResults: ScanResult[] = (bearData?.results ?? [])
-    .sort((a: any, b: any) => b.confidence - a.confidence)
-    .map((r: any) => toScanResult(r, 'bear'));
+  const rawBearResults: any[] = (bearData?.results ?? [])
+    .sort((a: any, b: any) => b.confidence - a.confidence);
 
-  const filteredBull = bullFilter ? bullResults.filter(r => r.yesterdayTrend === bullFilter) : bullResults;
-  const filteredBear = bearFilter ? bearResults.filter(r => r.yesterdayTrend === bearFilter) : bearResults;
+  const bullResults: ScanResult[] = rawBullResults.map((r: any) => toScanResult(r, 'bull'));
+  const bearResults: ScanResult[] = rawBearResults.map((r: any) => toScanResult(r, 'bear'));
+
+  // For filtered views we need to keep the raw item alongside the ScanResult
+  const bullPairs = bullResults.map((r, i) => ({ result: r, raw: rawBullResults[i] }));
+  const bearPairs = bearResults.map((r, i) => ({ result: r, raw: rawBearResults[i] }));
+
+  const filteredBull = bullFilter ? bullPairs.filter(p => p.result.yesterdayTrend === bullFilter) : bullPairs;
+  const filteredBear = bearFilter ? bearPairs.filter(p => p.result.yesterdayTrend === bearFilter) : bearPairs;
 
   const liveTimeStr = liveAt
     ? new Date(liveAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Taipei' })
@@ -154,7 +161,7 @@ export function AfterHoursScreener() {
   if (isLoading) {
     return (
       <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B8FA8', fontSize: 13, background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}` }}>
-        載入盤後資料中...
+        載入盤後資料中..
       </div>
     );
   }
@@ -162,7 +169,7 @@ export function AfterHoursScreener() {
   if (error) {
     return (
       <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UP_COLOR, fontSize: 13, background: '#0F1117', borderRadius: 8, border: `1px solid ${BORDER}` }}>
-        無法載入盤後資料
+        ⚠️ 無法載入盤後資料
       </div>
     );
   }
@@ -175,20 +182,20 @@ export function AfterHoursScreener() {
       {/* Status bar */}
       {marketOpen && isLive ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: '#081208', borderBottom: '1px solid #1a3a1a', fontSize: 11, color: DOWN_COLOR }}>
-          <span>🟢 盤中即時掃描｜更新時間: {liveTimeStr}｜每5分鐘自動更新</span>
+          <span>⚡ 即時報價模式 · 最後更新 {liveTimeStr}（每5分鐘自動刷新）</span>
           <button onClick={handleRebuild} disabled={rebuilding} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${DOWN_COLOR}44`, background: `${DOWN_COLOR}11`, color: DOWN_COLOR, opacity: rebuilding ? 0.5 : 1 }}>
-            {rebuilding ? '掃描中...' : '即時重新掃描'}
+            {rebuilding ? '更新中..' : '立即更新'}
           </button>
         </div>
       ) : marketOpen && !isLive ? (
         <div style={{ padding: '8px 16px', background: '#121208', borderBottom: '1px solid #3a3a1a', fontSize: 11, color: '#FFD700' }}>
-          🟡 市場開盤中，載入即時資料...
+          ⏳ 等待即時報價資料載入中...
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: '#08090E', borderBottom: `1px solid ${BORDER}`, fontSize: 11, color: '#8B8FA8' }}>
-          <span>盤後掃描</span>
+          <span>盤後模式</span>
           <button onClick={handleRebuild} disabled={rebuilding} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${BORDER}`, background: 'transparent', color: '#8B8FA8', opacity: rebuilding ? 0.5 : 1 }}>
-            {rebuilding ? '重建中...' : '立即重建'}
+            {rebuilding ? '重建中..' : '重新整理'}
           </button>
         </div>
       )}
@@ -203,7 +210,7 @@ export function AfterHoursScreener() {
           const count = tab === 'bull' ? bullResults.length : bearResults.length;
           return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, color: activeTab === tab ? color : '#8B8FA8', borderBottom: activeTab === tab ? `2px solid ${color}` : '2px solid transparent', background: 'transparent', cursor: 'pointer' }}>
-              {tab === 'bull' ? '多方候選' : '空方候選'}
+              {tab === 'bull' ? '看多' : '看空'}
               <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 10, color, background: `${color}22`, border: `1px solid ${color}44` }}>
                 {count}
               </span>
@@ -218,12 +225,17 @@ export function AfterHoursScreener() {
             <FilterChips filters={BULL_STRATEGY_FILTERS} active={bullFilter} onSelect={setBullFilter} color={UP_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBull.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無多方候選股</div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無看多訊號</div>
               ) : (
-                filteredBull.map((r, i) => (
-                  <div key={r.symbol} style={{ position: 'relative' }}>
-                    <StockSignalCard result={r} mode="afterhours" side="bull" />
-                    {isLive && (bullData?.results?.[i]?.isLivePrice) && (
+                filteredBull.map(({ result, raw }, i) => (
+                  <div key={result.symbol} style={{ position: 'relative' }}>
+                    <StockSignalCard
+                      result={result}
+                      mode="afterhours"
+                      side="bull"
+                      score={raw.confidence !== undefined ? Math.round(raw.confidence) : undefined}
+                    />
+                    {isLive && raw.isLivePrice && (
                       <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, background: `${DOWN_COLOR}22`, color: DOWN_COLOR, padding: '1px 5px', borderRadius: 3 }}>即時</span>
                     )}
                   </div>
@@ -236,12 +248,17 @@ export function AfterHoursScreener() {
             <FilterChips filters={BEAR_STRATEGY_FILTERS} active={bearFilter} onSelect={setBearFilter} color={DOWN_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBear.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無空方候選股</div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無看空訊號</div>
               ) : (
-                filteredBear.map((r, i) => (
-                  <div key={r.symbol} style={{ position: 'relative' }}>
-                    <StockSignalCard result={r} mode="afterhours" side="bear" />
-                    {isLive && (bearData?.results?.[i]?.isLivePrice) && (
+                filteredBear.map(({ result, raw }, i) => (
+                  <div key={result.symbol} style={{ position: 'relative' }}>
+                    <StockSignalCard
+                      result={result}
+                      mode="afterhours"
+                      side="bear"
+                      score={raw.confidence !== undefined ? Math.round(raw.confidence) : undefined}
+                    />
+                    {isLive && raw.isLivePrice && (
                       <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, background: `${DOWN_COLOR}22`, color: DOWN_COLOR, padding: '1px 5px', borderRadius: 3 }}>即時</span>
                     )}
                   </div>
