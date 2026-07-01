@@ -83,8 +83,6 @@ export function computeScore(
   const n = candles.length;
 
   // Detect if the last candle is today's live intraday price.
-  // When true, volume is partial and institutional data is T+1 stale —
-  // we adjust scoring accordingly to avoid unfair penalties.
   const taiwanToday = getTaiwanDateString();
   const isIntraday  = (candles[n - 1]?.date ?? '') === taiwanToday;
 
@@ -127,24 +125,50 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // TREND (0–100, weight 25%)
-  // Baseline 40 = neutral. Points added for bullish MA structure,
-  // subtracted for bearish structure. Capped bearish deduction at -20.
+  //
+  // FIX: Each MA condition is evaluated as mutually exclusive (bullish
+  // OR bearish, never both). This prevents contradictory reasons like
+  // "今日上漲，價<5MA" appearing simultaneously with bullish additions
+  // and bearish deductions cancelling each other out incorrectly.
+  //
+  // Baseline 40 = neutral.
+  // Bullish stack: +10 (今日上漲) +15 (價>5MA) +20 (5MA>20MA)
+  //                +15 (20MA>60MA) +10 (價>60MA) → max +70 → 110, clamped 100
+  // Bearish stack: -10 (今日下跌) -15 (價<5MA) -20 (5MA<20MA)
+  //                -15 (20MA<60MA) → max -60 → -20, clamped 0
   // ------------------------------------------------------------------
   let trendScore = 40;
   const trendReasons: string[] = [];
 
-  if (m5Now !== null && today.close > m5Now)  { trendScore += 15; trendReasons.push('價>5MA'); }
-  if (m5Now !== null && m20Now !== null && m5Now > m20Now)   { trendScore += 20; trendReasons.push('5MA>20MA'); }
-  if (m20Now !== null && m60Now !== null && m20Now > m60Now) { trendScore += 15; trendReasons.push('20MA>60MA'); }
-  if (m60Now !== null && today.close > m60Now) { trendScore += 10; trendReasons.push('價>60MA'); }
-  if (today.close > today.open)                { trendScore += 10; trendReasons.push('今日上漲'); }
+  // Today's candle direction — mutually exclusive
+  if (today.close > today.open) {
+    trendScore += 10; trendReasons.push('今日上漲');
+  } else if (today.close < today.open) {
+    trendScore -= 10; trendReasons.push('今日下跌');
+  }
 
-  // Bearish deductions — capped at -20 total
-  let trendDeductions = 0;
-  if (m5Now !== null && today.close < m5Now)  { trendDeductions += 15; trendReasons.push('價<5MA'); }
-  if (m5Now !== null && m20Now !== null && m5Now < m20Now)   { trendDeductions += 20; trendReasons.push('5MA<20MA'); }
-  if (m20Now !== null && m60Now !== null && m20Now < m60Now) { trendDeductions += 15; trendReasons.push('20MA<60MA'); }
-  trendScore -= Math.min(trendDeductions, 20);
+  // Price vs 5MA — mutually exclusive
+  if (m5Now !== null) {
+    if (today.close > m5Now)  { trendScore += 15; trendReasons.push('價>5MA'); }
+    else if (today.close < m5Now) { trendScore -= 15; trendReasons.push('價<5MA'); }
+  }
+
+  // 5MA vs 20MA — mutually exclusive
+  if (m5Now !== null && m20Now !== null) {
+    if (m5Now > m20Now)  { trendScore += 20; trendReasons.push('5MA>20MA'); }
+    else if (m5Now < m20Now) { trendScore -= 20; trendReasons.push('5MA<20MA'); }
+  }
+
+  // 20MA vs 60MA — mutually exclusive
+  if (m20Now !== null && m60Now !== null) {
+    if (m20Now > m60Now)  { trendScore += 15; trendReasons.push('20MA>60MA'); }
+    else if (m20Now < m60Now) { trendScore -= 15; trendReasons.push('20MA<60MA'); }
+  }
+
+  // Price vs 60MA — bonus only (no extra bearish deduction, 5MA<20MA already captures it)
+  if (m60Now !== null && today.close > m60Now) {
+    trendScore += 10; trendReasons.push('價>60MA');
+  }
 
   // ------------------------------------------------------------------
   // MOMENTUM (0–100, weight 20%)
@@ -171,14 +195,6 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // VOLUME (0–100, weight 20%)
-  //
-  // INTRADAY ADJUSTMENT: Partial-day volume always looks low vs the
-  // 5-day average of full trading days. To avoid unfairly penalising
-  // stocks during market hours, we:
-  //   1. Use a higher baseline (60 vs 50) during intraday
-  //   2. Skip shrinkage penalties (縮量) during intraday
-  //   3. Still reward genuine volume surges (放量/暴增)
-  // After close, normal full-day logic applies.
   // ------------------------------------------------------------------
   let volumeScore = isIntraday ? 60 : 50;
   const volReasons: string[] = [];
@@ -195,26 +211,21 @@ export function computeScore(
     } else if (vr >= 1) {
       volReasons.push(`量比${vr.toFixed(1)}x(正常)`);
     } else if (!isIntraday) {
-      // Only penalise shrinkage on full EOD candles — not partial intraday
       if (vr < 0.5)       { volumeScore -= 20; volReasons.push(`量比${vr.toFixed(1)}x(極度萎縮)`); }
       else if (vr < 0.8)  { volumeScore -= 10; volReasons.push(`量比${vr.toFixed(1)}x(縮量)`); }
     } else {
-      // Intraday partial volume — just note it, no penalty
       volReasons.push(`盤中量${vr.toFixed(1)}x(累計中)`);
     }
   }
 
-  // OBV rising = smart money accumulating (valid intraday too)
   if (obvData.length > 5 && obvData[obvData.length - 1] > obvData[obvData.length - 6]) {
     volumeScore += 20; volReasons.push('OBV上升');
   }
 
-  // Distribution warning: high volume + price drop (valid intraday too)
   if (av5 > 0 && todayVol > 1.5 * av5 && today.close < today.open) {
     volumeScore -= 25; volReasons.push('出貨警告');
   }
 
-  // Extreme volume drought — only on EOD data
   if (!isIntraday && av5 > 0 && todayVol < 0.3 * av5) {
     volumeScore -= 15; volReasons.push('量能極度萎縮');
   }
@@ -223,11 +234,6 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // CHIPS (0–100, weight 20%)
-  //
-  // Institutional data is always T+1 — it reflects yesterday's flows
-  // regardless of whether we're intraday or EOD. We note this to the
-  // user but don't adjust the scoring logic (chips is chips).
-  // Baseline 50 = neutral/no data.
   // ------------------------------------------------------------------
   let chipsScore = 50;
   const chipsReasons: string[] = [];
@@ -247,7 +253,6 @@ export function computeScore(
     const foreignToday  = Number(recent1?.foreign_net ?? 0);
     const trustToday    = Number(recent1?.trust_net   ?? 0);
 
-    // Foreign institutional — meaningful only when persistent
     if (allForeignPos) {
       chipsScore += 30; chipsReasons.push(`外資連買3日(+${foreignNet3})`);
     } else if (anyForeignPos) {
@@ -258,7 +263,6 @@ export function computeScore(
       chipsScore -= 5; chipsReasons.push('外資今日賣超');
     }
 
-    // Investment trust — secondary signal
     if (allTrustPos) {
       chipsScore += 20; chipsReasons.push(`投信連買3日(+${trustNet3})`);
     } else if (anyTrustPos) {
@@ -291,15 +295,12 @@ export function computeScore(
     }
   }
 
-  // Add intraday note so user understands chips reflects yesterday
   if (isIntraday) {
     chipsReasons.push('(籌碼為昨日資料)');
   }
 
   // ------------------------------------------------------------------
   // PATTERN (0–100, weight 10%)
-  // Fixed-point values per pattern type — no confidence multiplier.
-  // Baseline 40 = neutral. Bullish capped at +50, bearish at -40.
   // ------------------------------------------------------------------
   let patternScore = 40;
   const patReasons: string[] = [];
@@ -353,10 +354,23 @@ export function computeScore(
 
   // ------------------------------------------------------------------
   // SENTIMENT (0–100, weight 5%)
-  // Baseline 40 = neutral. Most normal stocks score 50-70.
+  //
+  // FIX 1: Widen bearish pattern lookback from 3 candles to 5 candles.
+  //        A 空頭吞噬 3 bars ago should still affect sentiment.
+  // FIX 2: When bearish patterns exist anywhere in detected patterns
+  //        (not just recent), still suppress the "近期無空頭型態" bonus.
+  //        The +10 bonus is only awarded when patterns list is fully clean.
+  // FIX 3: Sentiment baseline drops when trend is deeply bearish (< 35)
+  //        to avoid contradictory "情緒80 + 趨勢30" combinations.
   // ------------------------------------------------------------------
   let sentimentScore = 40;
   const sentReasons: string[] = [];
+
+  // FIX 3: Align sentiment baseline with trend environment
+  if (trendScore < 35) {
+    sentimentScore = 30;
+    sentReasons.push('弱勢趨勢環境');
+  }
 
   if (rsiNow !== null) {
     if (rsiNow >= 40 && rsiNow <= 65) {
@@ -382,11 +396,16 @@ export function computeScore(
     sentimentScore -= 15; sentReasons.push('跌破布林下軌');
   }
 
-  const recentBear = patterns.filter((p) => p.type === 'bearish' && p.candleIndex >= n - 3);
+  // FIX 1+2: Widen window to 5 candles; also check if any bearish pattern
+  // exists in the full detected list (deduped by name) to suppress the bonus.
+  const recentBear = patterns.filter((p) => p.type === 'bearish' && p.candleIndex >= n - 5);
+  const anyBearPattern = patterns.some((p) => p.type === 'bearish');
+
   if (recentBear.length > 0) {
     sentimentScore -= 15;
-    sentReasons.push(`近期空頭型態(${recentBear.map(p => p.name).join('/')})`);
-  } else {
+    sentReasons.push(`近期空頭型態(${[...new Set(recentBear.map(p => p.name))].join('/')})`);
+  } else if (!anyBearPattern) {
+    // Only give the bonus when there are genuinely zero bearish patterns
     sentimentScore += 10; sentReasons.push('近期無空頭型態');
   }
 
@@ -546,8 +565,8 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   // Chips (0–100)
   let chips = 0;
   if (input.foreign_consecutive_days !== null) {
-    if (input.foreign_consecutive_days >= 5)     { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
-    else if (input.foreign_consecutive_days >= 3) { chips += 30; }
+    if (input.foreign_consecutive_days >= 5)      { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
+    else if (input.foreign_consecutive_days >= 3)  { chips += 30; }
     else if (input.foreign_consecutive_days <= -3) { warnings.push('外資連賣'); }
   }
   if (input.triple_buy) { chips += 50; strengths.push('三大法人同步買超'); }
