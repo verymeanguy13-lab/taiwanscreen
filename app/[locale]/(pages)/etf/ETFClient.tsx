@@ -1,10 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Badge }    from '@/components/ui/Badge';
-import { Card }     from '@/components/ui/Card';
-import { Button }   from '@/components/ui/Button';
-import { Skeleton } from '@/components/ui/Skeleton';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ETFRow {
@@ -20,15 +16,55 @@ interface ETFRow {
   close:              number | null;
   change_pct:         number | null;
   latest_yield_pct:   number | null;
+  consecutive_years:  number | null;
   dividend_frequency: string | null;
   next_ex_date:       string | null;
   last_cash_dividend: number | null;
 }
 
+type SortKey = 'aum' | 'latest_yield_pct' | 'expense_ratio' | 'close' | 'change_pct';
+type SortDir = 'asc' | 'desc';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const BG       = '#08090E';
+const CARD     = '#0F1117';
+const BORDER   = '#1E2235';
+const MUTED    = '#8B8FA8';
+const TEXT     = '#E8EAF0';
+const TEXT2    = '#B0B4C8';
+const GREEN    = '#00D4AA';
+const RED      = '#FF4D6D';
+const GOLD     = '#F5B700';
+const BLUE     = '#3D8EF8';
+
+const TYPE_FILTERS = [
+  { key: 'all',      label: '全部' },
+  { key: 'index',    label: '指數型' },
+  { key: 'dividend', label: '高息型' },
+  { key: 'esg',      label: 'ESG' },
+  { key: 'tech',     label: '科技型' },
+  { key: 'bond',     label: '債券型' },
+];
+
+const FREQ_FILTERS = [
+  { key: 'all',        label: '全部頻率' },
+  { key: 'monthly',    label: '月配' },
+  { key: 'quarterly',  label: '季配' },
+  { key: 'annual',     label: '年配' },
+];
+
+const SORT_OPTIONS: { key: SortKey; label: string; dir: SortDir }[] = [
+  { key: 'aum',             label: '規模↓',   dir: 'desc' },
+  { key: 'latest_yield_pct',label: '殖利率↓', dir: 'desc' },
+  { key: 'expense_ratio',   label: '費用率↑', dir: 'asc'  },
+  { key: 'change_pct',      label: '漲跌幅↓', dir: 'desc' },
+];
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAum(v: number | null): string {
   if (!v) return '—';
-  return `NT$${(v / 100_000_000).toFixed(0)}億`;
+  const b = v / 100_000_000;
+  return b >= 1000 ? `${(b / 1000).toFixed(1)}兆` : `${b.toFixed(0)}億`;
 }
 
 function fmtFreq(freq: string | null): string {
@@ -41,295 +77,404 @@ function fmtFreq(freq: string | null): string {
 
 function etfTypeLabel(type: string | null): string {
   if (!type) return '其他';
-  if (type.includes('esg')) return 'ESG高息';
-  if (type === 'dividend')  return '高息型';
-  if (type === 'index')     return '指數型';
+  if (type.includes('esg'))  return 'ESG';
+  if (type === 'dividend')   return '高息';
+  if (type === 'index')      return '指數';
+  if (type === 'tech')       return '科技';
+  if (type === 'bond')       return '債券';
   return type;
 }
 
-function etfTypeBadge(type: string | null): 'green' | 'gold' | 'blue' | 'grey' {
-  if (!type) return 'grey';
-  if (type.includes('esg')) return 'green';
-  if (type === 'dividend')  return 'gold';
-  if (type === 'index')     return 'blue';
-  return 'grey';
+function etfTypeColor(type: string | null): string {
+  if (!type) return MUTED;
+  if (type.includes('esg')) return GREEN;
+  if (type === 'dividend')  return GOLD;
+  if (type === 'index')     return BLUE;
+  if (type === 'tech')      return '#A78BFA';
+  if (type === 'bond')      return '#FB923C';
+  return MUTED;
 }
 
-// ── Investor profiles ─────────────────────────────────────────────────────────
-const PROFILES = [
-  { key: 'newbie',   label: '新手求穩',   symbols: ['0050'],           reason: '0050 追蹤台灣50大企業，分散風險、長期績效穩健，是入門首選。費用率極低，適合定期定額。' },
-  { key: 'dividend', label: '存股領息',   symbols: ['00878', '00929'], reason: '00878 為ESG高息ETF，季配息穩定；00929 科技股為主，月月配息現金流穩定。兩者搭配可平衡成長與收益。' },
-  { key: 'growth',   label: '積極成長',   symbols: ['0050', '006208'], reason: '0050 與 006208 同樣追蹤台灣50，006208 費用率更低（0.23%），兩者皆適合長期持有等待資本增值。' },
-  { key: 'monthly',  label: '月月領息',   symbols: ['00929', '00919'], reason: '00929 與 00919 均為月配息ETF，可每月提供穩定現金流，適合退休族或需要定期現金收入的投資人。' },
-];
+function matchesType(etf: ETFRow, filter: string): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'esg') return !!(etf.etf_type?.includes('esg'));
+  return etf.etf_type === filter;
+}
 
-const COMPARE_ROWS: { label: string; key: keyof ETFRow; fmt: (v: unknown) => string }[] = [
-  { label: '全名',     key: 'full_name',        fmt: v => String(v ?? '—') },
-  { label: '類型',     key: 'etf_type',         fmt: v => etfTypeLabel(v as string) },
-  { label: '總費用率', key: 'expense_ratio',    fmt: v => v != null ? `${(Number(v) * 100).toFixed(2)}%` : '—' },
-  { label: '殖利率',   key: 'latest_yield_pct', fmt: v => v != null ? `${Number(v).toFixed(2)}%` : '—' },
-  { label: '配息頻率', key: 'dividend_freq',    fmt: v => fmtFreq(v as string) },
-  { label: '規模(億)', key: 'aum',              fmt: v => v != null ? `${(Number(v) / 100_000_000).toFixed(0)}` : '—' },
-  { label: '成立日期', key: 'inception_date',   fmt: v => v ? String(v).slice(0, 10) : '—' },
-  { label: '股價',     key: 'close',            fmt: v => v != null ? `NT$${Number(v).toFixed(2)}` : '—' },
-];
+function matchesFreq(etf: ETFRow, filter: string): boolean {
+  if (filter === 'all') return true;
+  return (etf.dividend_freq ?? etf.dividend_frequency) === filter;
+}
 
-const HIGHER_IS_BETTER = new Set(['latest_yield_pct', 'aum', 'close']);
-const LOWER_IS_BETTER  = new Set(['expense_ratio']);
-
-// ── Main component — only renders client-side ─────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 export default function ETFClient() {
-  const [ready, setReady]               = useState(false);
-  const [etfs, setEtfs]                 = useState<ETFRow[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [selectedSymbols, setSelected]  = useState<string[]>([]);
-  const [comparing, setComparing]       = useState(false);
-  const [profile, setProfile]           = useState<string | null>(null);
+  const [etfs, setEtfs]         = useState<ETFRow[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [typeFilter, setType]   = useState('all');
+  const [freqFilter, setFreq]   = useState('all');
+  const [sortKey, setSortKey]   = useState<SortKey>('aum');
+  const [sortDir, setSortDir]   = useState<SortDir>('desc');
+  const [search, setSearch]     = useState('');
+  const [pinned, setPinned]     = useState<string[]>([]);
+  const [comparing, setComparing] = useState(false);
 
-  // Fetch on client only
   useEffect(() => {
-    setReady(true);
     fetch('/api/etf')
       .then(r => r.json())
-      .then(d => {
-        setEtfs(d?.data?.etfs ?? []);
-        setLoading(false);
-      })
+      .then(d => { setEtfs(d?.data?.etfs ?? []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
-  const toggle = useCallback((symbol: string) => {
-    setSelected(prev =>
-      prev.includes(symbol)
-        ? prev.filter(s => s !== symbol)
+  const togglePin = useCallback((symbol: string) => {
+    setPinned(prev =>
+      prev.includes(symbol) ? prev.filter(s => s !== symbol)
         : prev.length < 4 ? [...prev, symbol] : prev
     );
   }, []);
 
-  if (!ready) return null;
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    else {
+      setSortKey(key);
+      setSortDir(SORT_OPTIONS.find(o => o.key === key)?.dir ?? 'desc');
+    }
+  };
 
-  if (loading) {
+  const filtered = useMemo(() => {
+    let list = etfs.filter(e =>
+      matchesType(e, typeFilter) &&
+      matchesFreq(e, freqFilter) &&
+      (search === '' ||
+        e.symbol.includes(search.toUpperCase()) ||
+        e.name_zh.includes(search))
+    );
+    list = [...list].sort((a, b) => {
+      const av = a[sortKey] ?? (sortDir === 'desc' ? -Infinity : Infinity);
+      const bv = b[sortKey] ?? (sortDir === 'desc' ? -Infinity : Infinity);
+      return sortDir === 'desc' ? Number(bv) - Number(av) : Number(av) - Number(bv);
+    });
+    return list;
+  }, [etfs, typeFilter, freqFilter, search, sortKey, sortDir]);
+
+  const pinnedEtfs = etfs.filter(e => pinned.includes(e.symbol));
+
+  // ── Compare view ────────────────────────────────────────────────────────────
+  if (comparing && pinnedEtfs.length >= 2) {
+    const ROWS: { label: string; render: (e: ETFRow) => { display: string; num: number | null } }[] = [
+      { label: '股價',     render: e => ({ display: e.close != null ? `NT$${Number(e.close).toFixed(2)}` : '—', num: e.close }) },
+      { label: '殖利率',   render: e => ({ display: e.latest_yield_pct != null ? `${Number(e.latest_yield_pct).toFixed(2)}%` : '—', num: e.latest_yield_pct }) },
+      { label: '費用率',   render: e => ({ display: e.expense_ratio != null ? `${(Number(e.expense_ratio) * 100).toFixed(2)}%` : '—', num: e.expense_ratio }) },
+      { label: '規模',     render: e => ({ display: fmtAum(e.aum), num: e.aum }) },
+      { label: '配息頻率', render: e => ({ display: fmtFreq(e.dividend_freq), num: null }) },
+      { label: '類型',     render: e => ({ display: etfTypeLabel(e.etf_type), num: null }) },
+      { label: '成立日期', render: e => ({ display: e.inception_date ? String(e.inception_date).slice(0, 10) : '—', num: null }) },
+    ];
+    const HIGHER = new Set(['latest_yield_pct', 'aum', 'close']);
+    const LOWER  = new Set(['expense_ratio']);
+
     return (
-      <div className="mx-auto max-w-screen-xl px-4 py-6 flex flex-col gap-4">
-        <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[0,1,2,3,4,5].map(i => <Skeleton key={i} className="h-44" />)}
+      <div style={{ minHeight: '100vh', background: BG, padding: '24px 16px' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <h1 style={{ color: TEXT, fontSize: 18, fontWeight: 700 }}>ETF 比較</h1>
+            <button onClick={() => setComparing(false)}
+              style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: MUTED, cursor: 'pointer' }}>
+              ← 返回列表
+            </button>
+          </div>
+          <div style={{ overflowX: 'auto', borderRadius: 10, border: `1px solid ${BORDER}` }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#0C0E18', borderBottom: `1px solid ${BORDER}` }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', color: MUTED, fontWeight: 600, width: 100 }}>項目</th>
+                  {pinnedEtfs.map(e => (
+                    <th key={e.symbol} style={{ padding: '12px 16px', textAlign: 'center', color: GREEN, fontWeight: 700 }}>
+                      <div>{e.symbol}</div>
+                      <div style={{ fontSize: 11, color: TEXT2, fontWeight: 400 }}>{e.name_zh}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ROWS.map(({ label, render }) => {
+                  const cells = pinnedEtfs.map(e => render(e));
+                  const nums = cells.map(c => c.num);
+                  const validNums = nums.filter(n => n !== null) as number[];
+                  const rowKey = label === '殖利率' ? 'latest_yield_pct' : label === '費用率' ? 'expense_ratio' : label === '規模' ? 'aum' : '';
+                  const bestNum = validNums.length
+                    ? HIGHER.has(rowKey) ? Math.max(...validNums)
+                      : LOWER.has(rowKey) ? Math.min(...validNums) : null
+                    : null;
+                  return (
+                    <tr key={label} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                      <td style={{ padding: '10px 16px', color: MUTED, background: '#0C0E18', fontWeight: 600, fontSize: 12 }}>{label}</td>
+                      {cells.map((cell, i) => {
+                        const isBest = bestNum !== null && cell.num === bestNum;
+                        return (
+                          <td key={i} style={{
+                            padding: '10px 16px', textAlign: 'center',
+                            color: isBest ? GREEN : TEXT,
+                            background: isBest ? 'rgba(0,212,170,0.07)' : i % 2 === 0 ? CARD : '#0C0E18',
+                            fontWeight: isBest ? 700 : 400,
+                            fontFamily: "'IBM Plex Mono', monospace",
+                          }}>
+                            {cell.display}
+                            {isBest && <span style={{ marginLeft: 4, fontSize: 10, color: GREEN }}>★</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
   }
 
-  const selectedEtfs = etfs.filter(e => selectedSymbols.includes(e.symbol));
-  const currentProfile = PROFILES.find(p => p.key === profile);
-  const recommended = etfs.filter(e => currentProfile?.symbols.includes(e.symbol));
-
+  // ── Main list view ──────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen pb-24" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <div className="mx-auto max-w-screen-xl px-4 py-6 flex flex-col gap-6">
+    <div style={{ minHeight: '100vh', background: BG, paddingBottom: 80 }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
 
-        {/* Title */}
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>ETF 比較</h1>
-          <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-            點擊ETF卡片選取（最多4支），然後點擊開始比較
+        {/* Header */}
+        <div style={{ marginBottom: 20 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: TEXT, margin: 0 }}>台灣 ETF 篩選器</h1>
+          <p style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+            {loading ? '載入中...' : `共 ${etfs.length} 檔 ETF · 顯示 ${filtered.length} 檔`}
           </p>
         </div>
 
-        {/* Selection banner */}
-        {selectedSymbols.length > 0 && !comparing && (
-          <div className="flex items-center justify-between rounded-lg px-4 py-2.5 text-sm"
-            style={{ backgroundColor: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.25)' }}>
-            <span style={{ color: 'var(--accent-green)' }}>
-              已選 {selectedSymbols.length} 支：{selectedSymbols.join('、')}
+        {/* Search + Sort bar */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="搜尋代號或名稱..."
+            style={{
+              flex: 1, minWidth: 160, padding: '7px 12px', fontSize: 13,
+              background: CARD, border: `1px solid ${BORDER}`, borderRadius: 7,
+              color: TEXT, outline: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {SORT_OPTIONS.map(opt => (
+              <button key={opt.key} onClick={() => handleSort(opt.key)}
+                style={{
+                  padding: '7px 12px', fontSize: 12, borderRadius: 7, cursor: 'pointer',
+                  border: `1px solid ${sortKey === opt.key ? GREEN : BORDER}`,
+                  background: sortKey === opt.key ? 'rgba(0,212,170,0.1)' : 'transparent',
+                  color: sortKey === opt.key ? GREEN : MUTED,
+                  fontWeight: sortKey === opt.key ? 700 : 400,
+                }}>
+                {opt.label}{sortKey === opt.key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Type filter tabs */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {TYPE_FILTERS.map(f => (
+            <button key={f.key} onClick={() => setType(f.key)}
+              style={{
+                padding: '5px 14px', fontSize: 12, borderRadius: 20, cursor: 'pointer',
+                border: `1px solid ${typeFilter === f.key ? BLUE : BORDER}`,
+                background: typeFilter === f.key ? 'rgba(61,142,248,0.12)' : 'transparent',
+                color: typeFilter === f.key ? BLUE : MUTED,
+                fontWeight: typeFilter === f.key ? 700 : 400,
+              }}>
+              {f.label}
+            </button>
+          ))}
+          <div style={{ width: 1, background: BORDER, margin: '0 4px' }} />
+          {FREQ_FILTERS.map(f => (
+            <button key={f.key} onClick={() => setFreq(f.key)}
+              style={{
+                padding: '5px 14px', fontSize: 12, borderRadius: 20, cursor: 'pointer',
+                border: `1px solid ${freqFilter === f.key ? GOLD : BORDER}`,
+                background: freqFilter === f.key ? 'rgba(245,183,0,0.1)' : 'transparent',
+                color: freqFilter === f.key ? GOLD : MUTED,
+                fontWeight: freqFilter === f.key ? 700 : 400,
+              }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Compare banner */}
+        {pinned.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px', borderRadius: 8, marginBottom: 14,
+            background: 'rgba(0,212,170,0.06)', border: `1px solid rgba(0,212,170,0.25)`,
+          }}>
+            <span style={{ fontSize: 13, color: GREEN }}>
+              已選 {pinned.length}/4：{pinned.join('、')}
             </span>
-            <div className="flex gap-2">
-              <button onClick={() => { setSelected([]); setComparing(false); }}
-                className="text-xs px-3 py-1 rounded"
-                style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setPinned([])}
+                style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer', border: `1px solid ${BORDER}`, background: 'transparent', color: MUTED }}>
                 清除
               </button>
-              <button onClick={() => setComparing(true)}
-                className="text-xs px-3 py-1 rounded font-semibold"
-                style={{ backgroundColor: 'var(--accent-green)', color: 'var(--bg-primary)' }}>
+              <button onClick={() => setComparing(true)} disabled={pinned.length < 2}
+                style={{
+                  fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: pinned.length < 2 ? 'not-allowed' : 'pointer',
+                  background: pinned.length >= 2 ? GREEN : BORDER, color: pinned.length >= 2 ? BG : MUTED,
+                  border: 'none', fontWeight: 700, opacity: pinned.length < 2 ? 0.5 : 1,
+                }}>
                 開始比較 →
               </button>
             </div>
           </div>
         )}
 
-        {/* Comparison table */}
-        {comparing && selectedEtfs.length > 0 && (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>ETF 比較表</h2>
-              <Button variant="outline" size="sm" onClick={() => { setComparing(false); setSelected([]); }}>
-                重新選擇
-              </Button>
-            </div>
-            <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
-              <table className="w-full text-xs" style={{ minWidth: `${selectedEtfs.length * 130 + 100}px` }}>
-                <thead>
-                  <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
-                    <th className="px-4 py-3 text-left font-semibold w-24" style={{ color: 'var(--text-muted)' }}>項目</th>
-                    {selectedEtfs.map(e => (
-                      <th key={e.symbol} className="px-4 py-3 text-center font-bold" style={{ color: 'var(--accent-green)' }}>
-                        {e.symbol}<br />
-                        <span className="font-normal" style={{ color: 'var(--text-secondary)' }}>{e.name_zh}</span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {COMPARE_ROWS.map(({ label, key, fmt }) => {
-                    const nums = selectedEtfs.map(e => {
-                      const v = e[key];
-                      return v != null && !isNaN(Number(v)) ? Number(v) : null;
-                    });
-                    const valid = nums.filter(n => n !== null) as number[];
-                    const best = valid.length
-                      ? HIGHER_IS_BETTER.has(key) ? Math.max(...valid)
-                        : LOWER_IS_BETTER.has(key) ? Math.min(...valid)
-                        : null
-                      : null;
-                    return (
-                      <tr key={key} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-4 py-2.5 font-semibold"
-                          style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-secondary)' }}>
-                          {label}
-                        </td>
-                        {selectedEtfs.map((e, idx) => {
-                          const num = nums[idx];
-                          const isBest = best !== null && num === best;
-                          return (
-                            <td key={e.symbol} className="num px-4 py-2.5 text-center"
-                              style={{
-                                color: isBest ? 'var(--accent-green)' : 'var(--text-primary)',
-                                backgroundColor: isBest ? 'rgba(0,212,170,0.08)' : idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-secondary)',
-                                fontWeight: isBest ? 600 : 400,
-                              }}>
-                              {fmt(e[key])}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ETF grid */}
-        {!comparing && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {etfs.map(etf => {
-              const selected = selectedSymbols.includes(etf.symbol);
-              const disabled = selectedSymbols.length >= 4 && !selected;
-              return (
-                <button
-                  key={etf.symbol}
-                  onClick={() => !disabled && toggle(etf.symbol)}
-                  className="flex flex-col gap-3 rounded-xl p-4 text-left transition-all duration-150"
+        {/* Table */}
+        {loading ? (
+          <div style={{ padding: 60, textAlign: 'center', color: MUTED, fontSize: 13 }}>載入中...</div>
+        ) : (
+          <div style={{ borderRadius: 10, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
+            {/* Table header */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '200px 64px 90px 80px 70px 72px 60px 72px',
+              background: '#0C0E18', borderBottom: `1px solid ${BORDER}`,
+              padding: '10px 16px', gap: 8,
+            }}>
+              {[
+                { label: 'ETF', sortable: false },
+                { label: '類型', sortable: false },
+                { label: '殖利率', key: 'latest_yield_pct' },
+                { label: '費用率', key: 'expense_ratio' },
+                { label: '配息', sortable: false },
+                { label: '規模', key: 'aum' },
+                { label: '股價', key: 'close' },
+                { label: '漲跌', key: 'change_pct' },
+              ].map((col, i) => (
+                <div key={i}
+                  onClick={() => col.key && handleSort(col.key as SortKey)}
                   style={{
-                    backgroundColor: selected ? 'rgba(0,212,170,0.06)' : 'var(--bg-card)',
-                    border: selected ? '2px solid var(--accent-green)' : '1px solid var(--border)',
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    opacity: disabled ? 0.5 : 1,
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="num text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                          {etf.symbol}
-                        </span>
-                        <Badge variant={etfTypeBadge(etf.etf_type)}>{etfTypeLabel(etf.etf_type)}</Badge>
-                      </div>
-                      <div className="mt-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{etf.name_zh}</div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium"
-                      style={{
-                        backgroundColor: selected ? 'rgba(0,212,170,0.15)' : 'var(--bg-secondary)',
-                        color: selected ? 'var(--accent-green)' : 'var(--text-muted)',
-                        border: `1px solid ${selected ? 'var(--accent-green)' : 'var(--border)'}`,
+                    fontSize: 11, fontWeight: 600, color: col.key && sortKey === col.key ? GREEN : MUTED,
+                    cursor: col.key ? 'pointer' : 'default',
+                    textAlign: i >= 2 ? 'right' : 'left',
+                    userSelect: 'none',
+                  }}>
+                  {col.label}
+                  {col.key && sortKey === col.key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+                </div>
+              ))}
+            </div>
+
+            {/* Rows */}
+            {filtered.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: MUTED, fontSize: 13 }}>
+                沒有符合條件的 ETF
+              </div>
+            ) : (
+              filtered.map((etf, idx) => {
+                const isPinned = pinned.includes(etf.symbol);
+                const disabled = pinned.length >= 4 && !isPinned;
+                const typeColor = etfTypeColor(etf.etf_type);
+                const chg = etf.change_pct;
+                const chgColor = chg == null ? MUTED : chg >= 0 ? RED : GREEN;
+
+                return (
+                  <div key={etf.symbol}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '200px 64px 90px 80px 70px 72px 60px 72px',
+                      padding: '11px 16px', gap: 8, alignItems: 'center',
+                      background: isPinned ? 'rgba(0,212,170,0.05)' : idx % 2 === 0 ? CARD : '#0B0D13',
+                      borderBottom: `1px solid ${BORDER}`,
+                      borderLeft: isPinned ? `3px solid ${GREEN}` : '3px solid transparent',
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      opacity: disabled ? 0.45 : 1,
+                      transition: 'background 0.1s',
+                    }}
+                    onClick={() => !disabled && togglePin(etf.symbol)}
+                  >
+                    {/* ETF name col */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${isPinned ? GREEN : BORDER}`,
+                        background: isPinned ? GREEN : 'transparent', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                      {selected ? '✓ 已選' : '+ 比較'}
+                        {isPinned && <span style={{ fontSize: 9, color: BG, fontWeight: 900 }}>✓</span>}
+                      </div>
+                      <div style={{ overflow: 'hidden' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: TEXT, fontFamily: "'IBM Plex Mono', monospace" }}>
+                          {etf.symbol}
+                        </div>
+                        <div style={{ fontSize: 11, color: TEXT2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {etf.name_zh}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>年化殖利率</div>
-                    <div className="num text-2xl font-bold"
-                      style={{ color: etf.latest_yield_pct ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-                      {etf.latest_yield_pct != null ? `${Number(etf.latest_yield_pct).toFixed(2)}%` : '—'}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-y-1.5 gap-x-3 text-xs">
+                    {/* Type badge */}
                     <div>
-                      <span style={{ color: 'var(--text-muted)' }}>費用率 </span>
-                      <span className="num font-medium" style={{ color: 'var(--text-secondary)' }}>
+                      <span style={{
+                        fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
+                        color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`,
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {etfTypeLabel(etf.etf_type)}
+                      </span>
+                    </div>
+
+                    {/* Yield */}
+                    <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: etf.latest_yield_pct ? GOLD : MUTED }}>
+                        {etf.latest_yield_pct != null ? `${Number(etf.latest_yield_pct).toFixed(2)}%` : '—'}
+                      </span>
+                    </div>
+
+                    {/* Expense ratio */}
+                    <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 12, color: TEXT2 }}>
                         {etf.expense_ratio != null ? `${(Number(etf.expense_ratio) * 100).toFixed(2)}%` : '—'}
                       </span>
                     </div>
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>配息頻率 </span>
-                      <span style={{ color: 'var(--text-secondary)' }}>{fmtFreq(etf.dividend_freq)}</span>
+
+                    {/* Freq */}
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: 11, color: MUTED }}>
+                        {fmtFreq(etf.dividend_freq ?? etf.dividend_frequency)}
+                      </span>
                     </div>
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>規模 </span>
-                      <span className="num font-medium" style={{ color: 'var(--text-secondary)' }}>{fmtAum(etf.aum)}</span>
+
+                    {/* AUM */}
+                    <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 12, color: TEXT2 }}>{fmtAum(etf.aum)}</span>
                     </div>
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>股價 </span>
-                      <span className="num font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {etf.close != null ? `NT$${Number(etf.close).toFixed(2)}` : '—'}
+
+                    {/* Price */}
+                    <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 12, color: TEXT }}>
+                        {etf.close != null ? `${Number(etf.close).toFixed(0)}` : '—'}
+                      </span>
+                    </div>
+
+                    {/* Change */}
+                    <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 12, color: chgColor }}>
+                        {chg != null ? `${chg >= 0 ? '+' : ''}${Number(chg).toFixed(2)}%` : '—'}
                       </span>
                     </div>
                   </div>
-                </button>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         )}
 
-        {/* Recommendation widget */}
-        <Card>
-          <h3 className="mb-4 text-sm font-bold" style={{ color: 'var(--text-primary)' }}>🤔 我是哪種投資人？</h3>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {PROFILES.map(p => (
-              <button key={p.key}
-                onClick={() => setProfile(profile === p.key ? null : p.key)}
-                className="rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-100"
-                style={{
-                  backgroundColor: profile === p.key ? 'var(--accent-green)' : 'var(--bg-secondary)',
-                  color: profile === p.key ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                  border: `1px solid ${profile === p.key ? 'var(--accent-green)' : 'var(--border)'}`,
-                }}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {currentProfile && (
-            <div className="mt-4 flex flex-col gap-3">
-              <div className="rounded-lg px-4 py-3 text-xs"
-                style={{ backgroundColor: 'rgba(61,142,248,0.08)', border: '1px solid rgba(61,142,248,0.2)', color: 'var(--text-secondary)' }}>
-                {currentProfile.reason}
-              </div>
-              <div className="flex flex-wrap gap-3">
-                {recommended.map(e => (
-                  <div key={e.symbol} className="flex flex-col rounded-lg px-4 py-3 gap-1"
-                    style={{ backgroundColor: 'rgba(0,212,170,0.06)', border: '1px solid rgba(0,212,170,0.2)' }}>
-                    <span className="num font-bold" style={{ color: 'var(--accent-green)' }}>{e.symbol}</span>
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{e.name_zh}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-
+        {/* Footer note */}
+        <p style={{ fontSize: 11, color: MUTED, marginTop: 16, textAlign: 'center' }}>
+          資料來源：台灣證券交易所 · 殖利率為近12個月年化計算 · 點擊列可加入比較（最多4檔）
+        </p>
       </div>
     </div>
   );
