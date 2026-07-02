@@ -41,6 +41,10 @@ export async function GET(req: NextRequest) {
         ? `AND s.market = 'TPEx'`
         : '';
 
+    // Use the latest date that has real trading volume — skips phantom rows
+    // inserted by seed scripts with volume=0 (e.g. ETF seed on a future date).
+    const LATEST_DATE_SQL = `(SELECT MAX(date) FROM daily_prices WHERE volume > 0)`;
+
     // ── 1. Stocks query ──────────────────────────────────────────────────────
     const stockRows = await queryUnsafe<HeatMapStock & { sector: string }>(
       `SELECT
@@ -54,7 +58,7 @@ export async function GET(req: NextRequest) {
        FROM stocks s
        JOIN daily_prices dp
          ON s.symbol = dp.symbol
-         AND dp.date = (SELECT MAX(date) FROM daily_prices)
+         AND dp.date = ${LATEST_DATE_SQL}
        LEFT JOIN fundamentals f
          ON s.symbol = f.symbol
          AND f.period = (
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
        FROM stocks s
        JOIN daily_prices dp
          ON s.symbol = dp.symbol
-         AND dp.date = (SELECT MAX(date) FROM daily_prices)
+         AND dp.date = ${LATEST_DATE_SQL}
        WHERE s.market IN ('TWSE', 'TPEx')
        ${marketFilter}`,
       [],
@@ -109,7 +113,6 @@ export async function GET(req: NextRequest) {
         close:      row.close      !== null ? Number(row.close)      : null,
         change_pct: row.change_pct !== null ? Number(row.change_pct) : null,
         volume:     row.volume     !== null ? Number(row.volume)     : null,
-        // For market_cap: fall back to volume-based sizing if null
         market_cap: row.market_cap !== null
           ? Number(row.market_cap)
           : (row.volume !== null ? Number(row.volume) * Number(row.close ?? 1) : null),
