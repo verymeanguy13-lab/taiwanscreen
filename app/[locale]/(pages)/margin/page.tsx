@@ -169,7 +169,7 @@ export default function MarginPage() {
   const { data: squeezeRes,  isLoading: squeezeLoading  } = useSWR('/api/margin?mode=short_squeeze',      fetcher);
 
   const totalRows: MarketTotalRow[] = totalRes?.data ?? [];
-  const latest = totalRows[totalRows.length - 1];
+  const latest = [...totalRows].reverse().find(r => n(r.total_margin) > 0);
 
   const trendData = totalRows.map(r => ({
     date:   String(r.date).slice(5),
