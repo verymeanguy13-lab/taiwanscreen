@@ -101,39 +101,50 @@ async function fetchTWSEPricesForDate(twseDate: string): Promise<PriceRow[]> {
   }
 }
 
-// ── TPEx prices (aftertrading) ────────────────────────────────────────────────
-async function fetchTPExPricesForDate(tpexDate: string): Promise<PriceRow[]> {
-  const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=EW&s=0,asc&o=json`;
+// ── TPEx prices (via TWSE OpenAPI mirror) ─────────────────────────────────────
+// tpex.org.tw blocks Vercel datacenter IPs, so we use the TWSE OpenAPI
+// which mirrors TPEx daily close data and is proven to work from Vercel.
+// Note: this endpoint returns today's data only (no date param) — that's fine
+// for the daily cron. For backfill we accept close=open=high=low.
+async function fetchTPExPricesForDate(_tpexDate: string): Promise<PriceRow[]> {
+  const url = 'https://openapi.twse.com.tw/v1/exchangeReport/TPEX_STOCK_DAY_AVG_ALL';
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return [];
-    const json = await res.json();
-    if (!json || !Array.isArray(json.aaData)) return [];
+    if (!res.ok) {
+      console.error(`[seed-prices] TPEx OpenAPI HTTP ${res.status}`);
+      return [];
+    }
+    const json = await res.json() as Array<Record<string, string>>;
+    if (!Array.isArray(json)) return [];
 
     const results: PriceRow[] = [];
-    for (const row of json.aaData) {
-      // TPEx row: [symbol, name, close, change, open, high, low, volume(shares), ...]
-      if (!Array.isArray(row) || row.length < 8) continue;
-      const symbol = String(row[0]).trim();
+    for (const row of json) {
+      const symbol = row['Code']?.trim();
       if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
-      const close      = clean(String(row[2]));
-      const changeStr  = String(row[3]).trim();
-      const change_amt = clean(changeStr.replace(/[▲▼+\-]/g, '')) * (changeStr.includes('▼') || changeStr.startsWith('-') ? -1 : 1);
-      const open       = clean(String(row[4]));
-      const high       = clean(String(row[5]));
-      const low        = clean(String(row[6]));
-      // TPEx volume is in shares, convert to lots (1 lot = 1000 shares)
-      const volume     = Math.round(clean(String(row[7])) / 1000);
+      const close      = parseFloat((row['ClosingPrice'] ?? '0').replace(/,/g, ''));
+      if (!close || close <= 0) continue;
+
+      const change_amt = parseFloat((row['Change'] ?? '0').replace(/,/g, ''));
       const prevClose  = close - change_amt;
       const change_pct = prevClose > 0 ? Math.round((change_amt / prevClose) * 10000) / 100 : 0;
+      const volume     = Math.round(parseFloat((row['TradeVolume'] ?? '0').replace(/,/g, '')) / 1000);
 
-      if (!close || close <= 0) continue;
-      results.push({ symbol, open, high, low, close, volume, change_amt, change_pct });
+      results.push({
+        symbol,
+        open:  close,
+        high:  close,
+        low:   close,
+        close,
+        volume,
+        change_amt,
+        change_pct,
+      });
     }
+    console.log(`[seed-prices] TPEx OpenAPI: ${results.length} stocks`);
     return results;
   } catch (err) {
     console.error('[seed-prices] TPEx fetch failed:', err);
