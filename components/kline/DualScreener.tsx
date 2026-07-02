@@ -110,7 +110,7 @@ export function DualScreener({ scanState }: Props) {
               result={r}
               mode="intraday"
               side="bull"
-              score={Math.round(r.trendStrength.bullScore)}
+              score={r.compositeScore}
             />
           ))
         )}
@@ -149,7 +149,7 @@ export function DualScreener({ scanState }: Props) {
               result={r}
               mode="intraday"
               side="bear"
-              score={Math.round(r.trendStrength.bearScore)}
+              score={r.compositeScore}
             />
           ))
         )}
