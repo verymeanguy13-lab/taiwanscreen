@@ -108,7 +108,7 @@ async function fetchYields(): Promise<Map<string, number>> {
       console.warn('⚠️  TWSE yield API returned', res.status);
       return map;
     }
-    const data: Array<{ Code: string; DividendYield: string }> = await res.json();
+    const data = (await res.json()) as Array<{ Code: string; DividendYield: string }>;
     for (const row of data) {
       const y = parseFloat(row.DividendYield);
       if (!isNaN(y)) map.set(row.Code, y);
@@ -131,7 +131,7 @@ async function fetchPrices(): Promise<Map<string, { close: number; changePct: nu
       console.warn('⚠️  TWSE price API returned', res.status);
       return map;
     }
-    const data: Array<{ Code: string; ClosingPrice: string }> = await res.json();
+    const data = (await res.json()) as Array<{ Code: string; ClosingPrice: string }>;
     for (const row of data) {
       const p = parseFloat(row.ClosingPrice.replace(/,/g, ''));
       if (!isNaN(p)) map.set(row.Code, { close: p, changePct: 0 });
