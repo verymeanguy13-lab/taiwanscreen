@@ -105,7 +105,13 @@ export function DualScreener({ scanState }: Props) {
           </div>
         ) : (
           filteredBull.map(r => (
-            <StockSignalCard key={r.symbol} result={r} mode="intraday" side="bull" />
+            <StockSignalCard
+              key={r.symbol}
+              result={r}
+              mode="intraday"
+              side="bull"
+              score={Math.round(r.trendStrength.bullScore)}
+            />
           ))
         )}
       </div>
@@ -138,7 +144,13 @@ export function DualScreener({ scanState }: Props) {
           </div>
         ) : (
           filteredBear.map(r => (
-            <StockSignalCard key={r.symbol} result={r} mode="intraday" side="bear" />
+            <StockSignalCard
+              key={r.symbol}
+              result={r}
+              mode="intraday"
+              side="bear"
+              score={Math.round(r.trendStrength.bearScore)}
+            />
           ))
         )}
       </div>
