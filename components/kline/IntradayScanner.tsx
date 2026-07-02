@@ -12,6 +12,7 @@ import type {
   YesterdayTrend,
 } from '@/lib/bullbearSignals';
 import type { Candle } from '@/types';
+import { computeScore } from '@/lib/scoring';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +29,7 @@ export interface ScanResult {
   yesterdayTrend:  YesterdayTrend;
   bullCount:       number;
   bearCount:       number;
+  compositeScore?: number;  // from computeScore() — same score shown on individual stock page
 }
 
 export interface ScanState {
@@ -164,7 +166,7 @@ export function useIntradayScanner(enabled: boolean) {
 
               // Use live price if available, fall back to last candle close
               const lastCandle = candles[candles.length - 1];
-              let price       = lastCandle.close;
+              let price        = lastCandle.close;
               let changePercent = lastCandle.close > 0 && candles.length >= 2
                 ? ((lastCandle.close - candles[candles.length - 2].close) / candles[candles.length - 2].close) * 100
                 : 0;
@@ -182,7 +184,6 @@ export function useIntradayScanner(enabled: boolean) {
               }
 
               // Use evaluateAfterHours for signal detection
-              // This works on daily candles — reliable, no tick stream needed
               const evalResult = evaluateAfterHours(candles, {
                 sma5:  indicators.sma5  ?? [],
                 sma20: indicators.sma20 ?? [],
@@ -194,7 +195,6 @@ export function useIntradayScanner(enabled: boolean) {
 
               // Skip stocks with no signals
               if (bullStrategies.length === 0 && bearStrategies.length === 0) return;
-              // Minimum score threshold to reduce noise
               if (bullScore < 10 && bearScore < 10) return;
 
               const signals = strategiesToSignals(
@@ -212,9 +212,21 @@ export function useIntradayScanner(enabled: boolean) {
               const bullCount = bullStrategies.length;
               const bearCount = bearStrategies.length;
 
+              // Compute the same composite score shown on the individual stock page.
+              // No institutional/margin data here (not fetched during intraday scan)
+              // so chips dimension defaults to baseline 50 — acceptable tradeoff.
+              let compositeScore: number | undefined;
+              try {
+                const scoreResult = computeScore(candles);
+                compositeScore = scoreResult.overall;
+              } catch {
+                // If scoring fails for any reason, just omit the score
+              }
+
               const result: ScanResult = {
                 symbol, name_zh, sector, price, changePercent,
-                signals, trendStrength, yesterdayTrend, bullCount, bearCount,
+                signals, trendStrength, yesterdayTrend,
+                bullCount, bearCount, compositeScore,
               };
 
               if (bullCount > 0 && bullScore >= 10) bull.push(result);
@@ -232,8 +244,8 @@ export function useIntradayScanner(enabled: boolean) {
           ...s,
           progress,
           scannedCount,
-          bull: [...bull].sort((a, b) => (b.trendStrength.bullScore - a.trendStrength.bullScore)),
-          bear: [...bear].sort((a, b) => (b.trendStrength.bearScore - a.trendStrength.bearScore)),
+          bull: [...bull].sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0)),
+          bear: [...bear].sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0)),
         }));
 
         await delay(200);
@@ -244,8 +256,8 @@ export function useIntradayScanner(enabled: boolean) {
         status:     'done',
         progress:   100,
         lastScanAt: new Date(),
-        bull: [...bull].sort((a, b) => (b.trendStrength.bullScore - a.trendStrength.bullScore)),
-        bear: [...bear].sort((a, b) => (b.trendStrength.bearScore - a.trendStrength.bearScore)),
+        bull: [...bull].sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0)),
+        bear: [...bear].sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0)),
       }));
     } catch {
       setState(s => ({ ...s, status: 'error' }));
