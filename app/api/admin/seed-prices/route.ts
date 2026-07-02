@@ -103,7 +103,7 @@ async function fetchTWSEPricesForDate(twseDate: string): Promise<PriceRow[]> {
 
 // ── TPEx prices (aftertrading) ────────────────────────────────────────────────
 async function fetchTPExPricesForDate(tpexDate: string): Promise<PriceRow[]> {
-  const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
+  const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=EW&s=0,asc&o=json`;
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
