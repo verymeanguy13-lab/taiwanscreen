@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
-  CartesianGrid, ResponsiveContainer, TooltipProps,
+  CartesianGrid, ResponsiveContainer,
 } from 'recharts';
 import { Tabs }     from '@/components/ui/Tabs';
 import { Card }     from '@/components/ui/Card';
@@ -23,27 +23,29 @@ interface MarketTotalRow {
 }
 
 interface MarginRow {
-  symbol:                  string;
-  name_zh:                 string;
-  sector:                  string | null;
-  margin_change:           number | null;
-  margin_balance:          number | null;
-  margin_ratio:            number | null;
-  short_balance:           number | null;
-  short_change:            number | null;
-  short_ratio:             number | null;
+  symbol:                   string;
+  name_zh:                  string;
+  sector:                   string | null;
+  margin_change:            number | null;
+  margin_balance:           number | null;
+  margin_ratio:             number | null;
+  short_balance:            number | null;
+  short_change:             number | null;
+  short_ratio:              number | null;
   foreign_consecutive_days: number | null;
-  foreign_net:             number | null;
-  squeeze_score:           number | null;
-  close:                   number | null;
-  change_pct:              number | null;
+  foreign_net:              number | null;
+  squeeze_score:            number | null;
+  close:                    number | null;
+  change_pct:               number | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const n = (v: unknown) => Number(v ?? 0);
 
-function fmtBil(v: number): string {
-  return `NT$${(v / 100_000_000).toFixed(0)}億`;
+// Format lot count as 萬張
+function fmtLots(v: number): string {
+  if (v >= 10000) return `${(v / 10000).toFixed(1)}萬張`;
+  return `${v.toLocaleString('en-US')}張`;
 }
 
 function fmtChange(v: number | null | undefined): string {
@@ -62,7 +64,7 @@ function TrendTooltip({ active, payload, label }: any) {
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex justify-between gap-4">
           <span style={{ color: p.stroke }}>{p.name}</span>
-          <span className="num">{fmtBil(n(p.value))}</span>
+          <span className="num">{fmtLots(n(p.value))}</span>
         </div>
       ))}
     </div>
@@ -162,17 +164,19 @@ const TABS = [
 export default function MarginPage() {
   const [activeTab, setActiveTab] = useState('decrease');
 
-  const { data: totalRes,    isLoading: totalLoading    } = useSWR('/api/margin?mode=market_total',       fetcher);
+  const { data: totalRes,    isLoading: totalLoading    } = useSWR('/api/margin?mode=market_total',        fetcher);
   const { data: increaseRes, isLoading: increaseLoading } = useSWR('/api/margin?mode=top_margin_increase', fetcher);
   const { data: decreaseRes, isLoading: decreaseLoading } = useSWR('/api/margin?mode=top_margin_decrease', fetcher);
-  const { data: shortRes,    isLoading: shortLoading    } = useSWR('/api/margin?mode=top_short',          fetcher);
-  const { data: squeezeRes,  isLoading: squeezeLoading  } = useSWR('/api/margin?mode=short_squeeze',      fetcher);
+  const { data: shortRes,    isLoading: shortLoading    } = useSWR('/api/margin?mode=top_short',           fetcher);
+  const { data: squeezeRes,  isLoading: squeezeLoading  } = useSWR('/api/margin?mode=short_squeeze',       fetcher);
 
   const totalRows: MarketTotalRow[] = totalRes?.data ?? [];
+
+  // Use last row that has actual non-zero margin data
   const latest = [...totalRows].reverse().find(r => n(r.total_margin) > 0);
 
   const trendData = totalRows.map(r => ({
-    date:   String(r.date).slice(5),
+    date:   String(r.date).slice(5, 10),
     融資餘額: n(r.total_margin),
     融券餘額: n(r.total_short),
   }));
@@ -247,14 +251,20 @@ export default function MarginPage() {
                 style={{ backgroundColor: 'rgba(255,77,109,0.08)', border: '1px solid rgba(255,77,109,0.25)' }}>
                 <span className="text-xs" style={{ color: 'var(--accent-red)' }}>今日全市場融資餘額</span>
                 <span className="num text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {latest?.total_margin ? fmtBil(n(latest.total_margin)) : '—'}
+                  {latest ? fmtLots(n(latest.total_margin)) : '—'}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {latest ? String(latest.date).slice(0, 10) : ''}
                 </span>
               </div>
               <div className="flex flex-col gap-1 rounded-xl px-4 py-3"
                 style={{ backgroundColor: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.25)' }}>
                 <span className="text-xs" style={{ color: 'var(--accent-green)' }}>今日全市場融券餘額</span>
                 <span className="num text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {latest?.total_short ? fmtBil(n(latest.total_short)) : '—'}
+                  {latest ? fmtLots(n(latest.total_short)) : '—'}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {latest ? String(latest.date).slice(0, 10) : ''}
                 </span>
               </div>
             </div>
@@ -278,11 +288,11 @@ export default function MarginPage() {
                   <YAxis yAxisId="margin" orientation="left"
                     tick={{ fontSize: 10, fill: 'var(--accent-red)' }}
                     axisLine={false} tickLine={false} width={64}
-                    tickFormatter={v => v >= 100_000_000 ? `${(v / 100_000_000).toFixed(0)}億` : String(v)} />
+                    tickFormatter={v => `${(v / 10000).toFixed(0)}萬`} />
                   <YAxis yAxisId="short" orientation="right"
                     tick={{ fontSize: 10, fill: 'var(--accent-green)' }}
                     axisLine={false} tickLine={false} width={54}
-                    tickFormatter={v => v >= 100_000_000 ? `${(v / 100_000_000).toFixed(0)}億` : String(v)} />
+                    tickFormatter={v => `${(v / 10000).toFixed(0)}萬`} />
                   <Tooltip content={<TrendTooltip />} />
                   <Line yAxisId="margin" type="monotone" dataKey="融資餘額"
                     stroke="var(--accent-red)" strokeWidth={1.5} dot={false} name="融資餘額" />
