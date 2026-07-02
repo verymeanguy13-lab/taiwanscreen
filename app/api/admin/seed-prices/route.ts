@@ -12,6 +12,14 @@ function toTWSEDate(d: Date): string {
   return `${y}${m}${day}`;
 }
 
+function toTPExDate(d: Date): string {
+  // TPEx uses YYYY/MM/DD format
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0];
 }
@@ -37,16 +45,19 @@ function pastBusinessDays(n: number, offset: number = 0): Date[] {
 
 const clean = (s: string) => parseFloat(s.replace(/,/g, '').trim()) || 0;
 
-async function fetchPricesForDate(twseDate: string): Promise<{
-  symbol: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
+interface PriceRow {
+  symbol:     string;
+  open:       number;
+  high:       number;
+  low:        number;
+  close:      number;
+  volume:     number;
   change_amt: number;
   change_pct: number;
-}[]> {
+}
+
+// ── TWSE prices (MI_INDEX) ────────────────────────────────────────────────────
+async function fetchTWSEPricesForDate(twseDate: string): Promise<PriceRow[]> {
   const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${twseDate}&type=ALLBUT0999`;
   try {
     const res = await fetch(url, {
@@ -64,10 +75,9 @@ async function fetchPricesForDate(twseDate: string): Promise<{
       t.fields && t.fields.length >= 9 &&
       t.fields[0]?.includes('證券代號')
     );
-
     if (!priceTable?.data) return [];
 
-    const results = [];
+    const results: PriceRow[] = [];
     for (const row of priceTable.data) {
       if (row.length < 9) continue;
       const symbol = row[0]?.trim();
@@ -83,20 +93,56 @@ async function fetchPricesForDate(twseDate: string): Promise<{
       const change_pct = open > 0 ? Math.round((change_amt / (close - change_amt)) * 10000) / 100 : 0;
 
       if (!close || close <= 0) continue;
-
       results.push({ symbol, open, high, low, close, volume, change_amt, change_pct });
     }
-
     return results;
   } catch {
     return [];
   }
 }
 
-async function upsertPrices(
-  isoDate: string,
-  prices: Awaited<ReturnType<typeof fetchPricesForDate>>,
-): Promise<number> {
+// ── TPEx prices (aftertrading) ────────────────────────────────────────────────
+async function fetchTPExPricesForDate(tpexDate: string): Promise<PriceRow[]> {
+  const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (!json || !Array.isArray(json.aaData)) return [];
+
+    const results: PriceRow[] = [];
+    for (const row of json.aaData) {
+      // TPEx row: [symbol, name, close, change, open, high, low, volume(shares), ...]
+      if (!Array.isArray(row) || row.length < 8) continue;
+      const symbol = String(row[0]).trim();
+      if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+
+      const close      = clean(String(row[2]));
+      const changeStr  = String(row[3]).trim();
+      const change_amt = clean(changeStr.replace(/[▲▼+\-]/g, '')) * (changeStr.includes('▼') || changeStr.startsWith('-') ? -1 : 1);
+      const open       = clean(String(row[4]));
+      const high       = clean(String(row[5]));
+      const low        = clean(String(row[6]));
+      // TPEx volume is in shares, convert to lots (1 lot = 1000 shares)
+      const volume     = Math.round(clean(String(row[7])) / 1000);
+      const prevClose  = close - change_amt;
+      const change_pct = prevClose > 0 ? Math.round((change_amt / prevClose) * 10000) / 100 : 0;
+
+      if (!close || close <= 0) continue;
+      results.push({ symbol, open, high, low, close, volume, change_amt, change_pct });
+    }
+    return results;
+  } catch (err) {
+    console.error('[seed-prices] TPEx fetch failed:', err);
+    return [];
+  }
+}
+
+// ── Upsert into DB ────────────────────────────────────────────────────────────
+async function upsertPrices(isoDate: string, prices: PriceRow[]): Promise<number> {
   let count = 0;
   for (const p of prices) {
     try {
@@ -131,20 +177,36 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const days = Math.min(Math.max(parseInt(body.days) || 5, 1), 60);
-  const startOffset = Math.min(Math.max(parseInt(body.startOffset) || 0, 0), 120);
+  const days        = Math.min(Math.max(parseInt(body.days)        || 5,   1), 60);
+  const startOffset = Math.min(Math.max(parseInt(body.startOffset) || 0,   0), 120);
   const businessDays = pastBusinessDays(days, startOffset);
 
-  const results: Record<string, { fetched: number; inserted: number }> = {};
+  const results: Record<string, { twse: number; tpex: number; inserted: number }> = {};
 
   for (const day of businessDays) {
     const isoDate  = toISO(day);
     const twseDate = toTWSEDate(day);
+    const tpexDate = toTPExDate(day);
 
-    const prices = await fetchPricesForDate(twseDate);
-    const inserted = prices.length > 0 ? await upsertPrices(isoDate, prices) : 0;
+    // Fetch TWSE and TPEx in parallel
+    const [twsePrices, tpexPrices] = await Promise.all([
+      fetchTWSEPricesForDate(twseDate),
+      fetchTPExPricesForDate(tpexDate),
+    ]);
 
-    results[isoDate] = { fetched: prices.length, inserted };
+    // Merge: TWSE wins on conflict (same symbol on both exchanges is rare)
+    const priceMap = new Map<string, PriceRow>();
+    for (const p of tpexPrices) priceMap.set(p.symbol, p);
+    for (const p of twsePrices) priceMap.set(p.symbol, p);
+    const merged = [...priceMap.values()];
+
+    const inserted = merged.length > 0 ? await upsertPrices(isoDate, merged) : 0;
+
+    results[isoDate] = {
+      twse:     twsePrices.length,
+      tpex:     tpexPrices.length,
+      inserted,
+    };
 
     await new Promise(r => setTimeout(r, 500));
   }
