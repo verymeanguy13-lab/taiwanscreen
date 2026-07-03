@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl';
 
 const NAV_LINKS = [
   { key: 'dazhang',      href: '/dazhang'      },
-  { key: 'accuracy',     href: '/accuracy'     },  // ← NEW
+  // { key: 'accuracy', href: '/accuracy' },  // ← NEW
   { key: 'rankings',     href: '/rankings'     },
   { key: 'screener',     href: '/screener'     },
   { key: 'heatmap',      href: '/heatmap'      },
