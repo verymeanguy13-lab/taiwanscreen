@@ -190,7 +190,17 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const days        = Math.min(Math.max(parseInt(body.days)        || 5,   1), 60);
   const startOffset = Math.min(Math.max(parseInt(body.startOffset) || 0,   0), 120);
-  const businessDays = pastBusinessDays(days, startOffset);
+
+  // forceDate: override date calculation, e.g. "20260703"
+  // Useful when today's EOD data is available but pastBusinessDays returns yesterday.
+  let businessDays: Date[];
+  if (body.forceDate && /^\d{8}$/.test(body.forceDate)) {
+    const fd = body.forceDate as string;
+    const forced = new Date(`${fd.slice(0,4)}-${fd.slice(4,6)}-${fd.slice(6,8)}T12:00:00+08:00`);
+    businessDays = [forced];
+  } else {
+    businessDays = pastBusinessDays(days, startOffset);
+  }
 
   const results: Record<string, { twse: number; tpex: number; inserted: number }> = {};
 
