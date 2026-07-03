@@ -81,7 +81,7 @@ export default function StockClient({ initialData }: { initialData?: any }) {
   const { data: liveQuote } = useSWR(
   symbol ? `/api/quote/${symbol}` : null,
   fetcher,
-  { refreshInterval: (data) => data?.isLive === false ? 0 : 15_000 }
+  { refreshInterval: 30_000 }
 );
 
   // ── Loading ────────────────────────────────────────────────────────────────
