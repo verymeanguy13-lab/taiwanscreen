@@ -452,7 +452,7 @@ export default function HomePage() {
       <ScannerSection />
 
       {/* Accuracy Teaser */}
-      <AccuracyTeaserSection />
+      {/* <AccuracyTeaserSection /> */}
 
       {/* Why Us */}
       <section className="border-t" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>

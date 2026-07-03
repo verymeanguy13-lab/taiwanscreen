@@ -42,6 +42,24 @@ async function fetchSummarySSR() {
 }
 
 export default async function AccuracyPage() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEMPORARY: page hidden while signal-evaluation cron backlog clears and
+  // pattern-label mismatch is fixed. Remove this early return to restore
+  // the live dashboard below. See Session 73 handoff notes.
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div style={{ textAlign: 'center', padding: 40 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 900, color: 'var(--text-primary)', marginBottom: 12 }}>
+          資料校準中
+        </h1>
+        <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+          歷史型態統計功能即將回歸，敬請期待
+        </p>
+      </div>
+    </div>
+  );
+
   const summary = await fetchSummarySSR();
 
   return (
