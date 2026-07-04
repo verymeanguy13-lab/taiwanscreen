@@ -27,10 +27,19 @@ export async function GET(req: NextRequest) {
   const month = parseInt(searchParams.get('month') ?? '3', 10);
   const rocYear = toROCYear(year);
 
+  // Matches the exact params fetchMonthlyRevenue() now sends after the fix
   const body = new URLSearchParams({
-    year:  String(rocYear),
-    month: String(month),
-    type:  'sii',
+    encodeURIComponent: '1',
+    step:     '1',
+    firstin:  '1',
+    off:      '1',
+    keyword4: '',
+    code1:    '',
+    TYPEK:    'sii',
+    isnew:    'false',
+    year:     String(rocYear),
+    month:    String(month),
+    type:     'sii',
   }).toString();
 
   try {
