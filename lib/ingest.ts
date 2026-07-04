@@ -10,7 +10,7 @@ import {
   fetchMarginData,
   fetchFundamentals,
 } from '@/lib/twse';
-import { fetchBalanceSheet, fetchBookValue } from '@/lib/mops';
+import { fetchBalanceSheet, fetchBookValue, fetchMonthlyRevenue } from '@/lib/mops';
 
 type IngestResult = { count: number; errors: string[] };
 
@@ -392,5 +392,53 @@ export async function ingestFundamentalsBalanceSheet(
   }
 
   console.log(`[ingestFundamentalsBalanceSheet] Done. ${count} rows, ${errors.length} errors.`);
+  return { count, errors };
+}
+
+// =============================================================================
+// ingestMonthlyRevenue — fetches monthly revenue + YoY growth from MOPS and
+// saves revenue_growth_yoy into the fundamentals table for the current
+// fiscal quarter (matching how other fundamentals fields are stored).
+// =============================================================================
+
+export async function ingestMonthlyRevenue(
+  year: number,
+  month: number,
+): Promise<IngestResult> {
+  const errors: string[] = [];
+  let count = 0;
+
+  console.log(`[ingestMonthlyRevenue] Fetching revenue for ${year}-${String(month).padStart(2, '0')}…`);
+  const records = await fetchMonthlyRevenue(year, month);
+  console.log(`[ingestMonthlyRevenue] Fetched ${records.length} records.`);
+
+  if (records.length === 0) {
+    return { count: 0, errors: [`No revenue data returned from MOPS for ${year}-${month}`] };
+  }
+
+  // File under the current calendar quarter, same convention as ingestFundamentals()
+  const now     = new Date();
+  const qYear   = now.getFullYear();
+  const quarter = Math.ceil((now.getMonth() + 1) / 3);
+  const period  = `${qYear}Q${quarter}`;
+
+  for (const r of records) {
+    try {
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, revenue_growth_yoy)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET revenue_growth_yoy = EXCLUDED.revenue_growth_yoy`,
+        [r.symbol, period, r.yoy_growth],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestMonthlyRevenue] Failed to upsert ${r.symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  console.log(`[ingestMonthlyRevenue] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
 }
