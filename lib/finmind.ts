@@ -77,6 +77,128 @@ export async function fetchStockFinancials(
   }
 }
 
+export interface LatestPBR {
+  date: string; // e.g. "2026-07-02"
+  per:  number | null;
+  pbr:  number | null;
+}
+
+/**
+ * Fetches the most recent PER/PBR snapshot for a single stock from FinMind's
+ * TaiwanStockPER dataset. This gives us pb_ratio directly — no need to
+ * compute book value per share ourselves.
+ */
+export async function fetchLatestPBR(stockId: string): Promise<LatestPBR | null> {
+  try {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 14); // small window, we only need the latest row
+    const startDateStr = startDate.toISOString().slice(0, 10);
+
+    const token = process.env.FINMIND_TOKEN ?? '';
+    const url = new URL(BASE_URL);
+    url.searchParams.set('dataset', 'TaiwanStockPER');
+    url.searchParams.set('data_id', stockId);
+    url.searchParams.set('start_date', startDateStr);
+
+    const res = await fetch(url.toString(), {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      console.error(`[fetchLatestPBR] HTTP ${res.status} for ${stockId}`);
+      return null;
+    }
+
+    const json = await res.json();
+    if (json?.status !== 200 || !Array.isArray(json?.data) || json.data.length === 0) {
+      return null;
+    }
+
+    const rows = json.data as { date: string; PER: number | null; PBR: number | null }[];
+    const latest = rows.sort((a, b) => a.date.localeCompare(b.date))[rows.length - 1];
+
+    return { date: latest.date, per: latest.PER ?? null, pbr: latest.PBR ?? null };
+  } catch (err) {
+    console.error(`[fetchLatestPBR] Unexpected error for ${stockId}:`, err);
+    return null;
+  }
+}
+
+export interface BalanceSheetSnapshot {
+  date: string;
+  totalAssets:      number | null;
+  totalLiabilities: number | null;
+}
+
+/**
+ * Fetches the most recent balance sheet snapshot for a single stock from
+ * FinMind's TaiwanStockBalanceSheet dataset, used to compute debt_ratio
+ * (totalLiabilities / totalAssets × 100).
+ *
+ * NOTE: FinMind's exact `type` label for these two line items hasn't been
+ * confirmed live yet — this matches against several plausible names. If a
+ * batch run comes back with debt_ratio all null, check the `errors` array
+ * from ingestBalanceSheetFinMind for the unmatched type list it logs, and
+ * adjust the matching below.
+ */
+export async function fetchStockBalanceSheet(
+  stockId: string,
+  monthsBack: number = 6,
+): Promise<BalanceSheetSnapshot[]> {
+  try {
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - monthsBack);
+    const startDateStr = startDate.toISOString().slice(0, 10);
+
+    const token = process.env.FINMIND_TOKEN ?? '';
+    const url = new URL(BASE_URL);
+    url.searchParams.set('dataset', 'TaiwanStockBalanceSheet');
+    url.searchParams.set('data_id', stockId);
+    url.searchParams.set('start_date', startDateStr);
+
+    const res = await fetch(url.toString(), {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      console.error(`[fetchStockBalanceSheet] HTTP ${res.status} for ${stockId}`);
+      return [];
+    }
+
+    const json = await res.json();
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      console.error(`[fetchStockBalanceSheet] Bad response for ${stockId}:`, json?.msg);
+      return [];
+    }
+
+    const byDate = new Map<string, { totalAssets: number | null; totalLiabilities: number | null }>();
+
+    for (const row of json.data as { date: string; type: string; value: number }[]) {
+      if (!byDate.has(row.date)) {
+        byDate.set(row.date, { totalAssets: null, totalLiabilities: null });
+      }
+      const entry = byDate.get(row.date)!;
+      // Match by exact name first, then a loose fallback in case FinMind's
+      // label differs slightly from what's documented.
+      if (row.type === 'TotalAssets' || (entry.totalAssets === null && row.type.includes('TotalAssets'))) {
+        entry.totalAssets = row.value;
+      }
+      if (row.type === 'Liabilities' || (entry.totalLiabilities === null && row.type.includes('Liabilities') && !row.type.includes('Current') && !row.type.includes('NonCurrent'))) {
+        entry.totalLiabilities = row.value;
+      }
+    }
+
+    return Array.from(byDate.entries())
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch (err) {
+    console.error(`[fetchStockBalanceSheet] Unexpected error for ${stockId}:`, err);
+    return [];
+  }
+}
+
 /** Wait for ms milliseconds — used to pace requests within a batch. */
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

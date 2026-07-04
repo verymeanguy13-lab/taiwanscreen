@@ -1,7 +1,7 @@
 // =============================================================================
 // lib/ingest.ts — TWSE data ingestion pipeline
 // =============================================================================
-import { fetchStockFinancials, sleep } from '@/lib/finmind';
+import { fetchStockFinancials, fetchLatestPBR, fetchStockBalanceSheet, sleep } from '@/lib/finmind';
 import { queryUnsafe } from '@/lib/db';
 import {
   fetchStockList,
@@ -540,5 +540,101 @@ export async function ingestFinancialStatements(
   }
 
   console.log(`[ingestFinancialStatements] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors.`);
+  return { count, errors, totalStocks };
+}
+
+// =============================================================================
+// ingestBalanceSheetFinMind — replaces the old MOPS-based
+// ingestFundamentalsBalanceSheet(). The MOPS ajax_t164sb03 (balance sheet)
+// and ajax_t05st22 (book value) endpoints are behind a referer-wall that
+// blocks automated requests (confirmed for ajax_t05st22, suspected for
+// ajax_t164sb03 — see Session 74 notes). This uses FinMind instead:
+//   - pb_ratio comes directly from FinMind's TaiwanStockPER dataset (PBR
+//     column) — no need to compute book value per share ourselves.
+//   - debt_ratio is computed from FinMind's TaiwanStockBalanceSheet dataset
+//     (totalLiabilities / totalAssets × 100).
+//
+// Same offset/limit batching pattern as ingestFinancialStatements, since
+// FinMind requires one call per stock on the free tier.
+// =============================================================================
+
+export async function ingestBalanceSheetFinMind(
+  offset: number,
+  limit: number,
+): Promise<IngestResult & { totalStocks: number }> {
+  const errors: string[] = [];
+  let count = 0;
+
+  const totalRow = await queryUnsafe<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM stocks WHERE market IN ('TWSE', 'TPEx')`,
+    [],
+  );
+  const totalStocks = parseInt(totalRow[0]?.cnt ?? '0', 10);
+
+  const stockRows = await queryUnsafe<{ symbol: string }>(
+    `SELECT symbol FROM stocks
+     WHERE market IN ('TWSE', 'TPEx')
+     ORDER BY symbol
+     LIMIT $1 OFFSET $2`,
+    [limit, offset],
+  );
+
+  console.log(`[ingestBalanceSheetFinMind] Processing ${stockRows.length} stocks (offset ${offset})…`);
+
+  for (const { symbol } of stockRows) {
+    try {
+      const [pbrData, balanceSheets] = await Promise.all([
+        fetchLatestPBR(symbol),
+        fetchStockBalanceSheet(symbol),
+      ]);
+
+      const pbRatio = pbrData?.pbr ?? null;
+      // Note: pe_ratio is intentionally left untouched here — it's already
+      // populated by ingestFundamentals() from TWSE's daily data, which is
+      // more current than FinMind's PER for this purpose.
+
+      const latestBS = balanceSheets[balanceSheets.length - 1];
+      const debtRatio =
+        latestBS?.totalAssets != null && latestBS?.totalLiabilities != null && latestBS.totalAssets !== 0
+          ? Math.round((latestBS.totalLiabilities / latestBS.totalAssets) * 10000) / 100
+          : null;
+
+      if (pbRatio === null && debtRatio === null) {
+        errors.push(`No PBR or balance sheet data for ${symbol}`);
+        await sleep(150);
+        continue;
+      }
+
+      // Use the balance sheet's own reporting date for the period if we have
+      // one; otherwise fall back to the PBR snapshot's date's quarter.
+      const periodSourceDate = latestBS?.date ?? pbrData?.date;
+      let period: string;
+      if (periodSourceDate) {
+        const [yearStr, monthStr] = periodSourceDate.split('-');
+        period = `${yearStr}Q${Math.ceil(parseInt(monthStr, 10) / 3)}`;
+      } else {
+        const now = new Date();
+        period = `${now.getFullYear()}Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+      }
+
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, debt_ratio, pb_ratio)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET debt_ratio = COALESCE($3, fundamentals.debt_ratio),
+               pb_ratio   = COALESCE($4, fundamentals.pb_ratio)`,
+        [symbol, period, debtRatio, pbRatio],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestBalanceSheetFinMind] Failed for ${symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+
+    await sleep(150);
+  }
+
+  console.log(`[ingestBalanceSheetFinMind] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors.`);
   return { count, errors, totalStocks };
 }
