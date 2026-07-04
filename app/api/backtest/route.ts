@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       .slice(0, 10);
 
     // ── Step 1: Find matching stocks AS OF start date ─────────────────────
-    const { conditions, params, nextIdx } = buildWhere(filters, startDate);
+    const { conditions, params } = buildWhere(filters, startDate);
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const matchingRows = await queryUnsafe<{ symbol: string; name_zh: string }>(
@@ -157,10 +157,9 @@ export async function POST(req: NextRequest) {
     const nameMap = new Map(matchingRows.map(r => [r.symbol, r.name_zh]));
 
     // ── Step 2: Compute return for each matching stock ────────────────────
-    // Find closest available start price and today's price
-    const endIdx  = nextIdx;
-    const startIdx = nextIdx + 1;
-
+    // Find closest available start price and today's price.
+    // NOTE: this is a fresh queryUnsafe() call, so its placeholders start
+    // over at $1 — they do NOT continue from the previous query's indices.
     const returnRows = await queryUnsafe<{
       symbol:       string;
       start_close:  string | null;
@@ -183,12 +182,12 @@ export async function POST(req: NextRequest) {
        JOIN daily_prices dp_end
          ON dp_start.symbol = dp_end.symbol
          AND dp_end.date = (SELECT MAX(date) FROM daily_prices)
-       WHERE dp_start.symbol = ANY($${endIdx})
+       WHERE dp_start.symbol = ANY($1)
          AND dp_start.date = (
            SELECT MAX(date)
            FROM daily_prices
            WHERE symbol = dp_start.symbol
-             AND date <= $${startIdx}
+             AND date <= $2
          )`,
       [symbols, startDate],
     );
