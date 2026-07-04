@@ -1,7 +1,7 @@
 // =============================================================================
 // lib/ingest.ts — TWSE data ingestion pipeline
 // =============================================================================
-
+import { fetchStockFinancials, sleep } from '@/lib/finmind';
 import { queryUnsafe } from '@/lib/db';
 import {
   fetchStockList,
@@ -452,4 +452,93 @@ export async function ingestMonthlyRevenue(): Promise<IngestResult> {
 
   console.log(`[ingestMonthlyRevenue] Done. Upserted ${count} rows under period ${period}, ${errors.length} errors.`);
   return { count, errors };
+}
+// =============================================================================
+// ingestFinancialStatements — fetches quarterly EPS, net income, and equity
+// from FinMind for a batch of stocks, computes eps_growth_yoy (vs. same
+// quarter one year ago) and roe, and saves both into the fundamentals table.
+//
+// Processes stocks in batches (offset/limit) since FinMind's free tier is
+// rate-limited (~600 requests/hour with a token) and there are ~1,100 stocks —
+// call this repeatedly (e.g. via cron-job.org every few minutes) to work
+// through the full list over time.
+// =============================================================================
+
+export async function ingestFinancialStatements(
+  offset: number,
+  limit: number,
+): Promise<IngestResult & { totalStocks: number }> {
+  const errors: string[] = [];
+  let count = 0;
+
+  const totalRow = await queryUnsafe<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM stocks WHERE market IN ('TWSE', 'TPEx')`,
+    [],
+  );
+  const totalStocks = parseInt(totalRow[0]?.cnt ?? '0', 10);
+
+  const stockRows = await queryUnsafe<{ symbol: string }>(
+    `SELECT symbol FROM stocks
+     WHERE market IN ('TWSE', 'TPEx')
+     ORDER BY symbol
+     LIMIT $1 OFFSET $2`,
+    [limit, offset],
+  );
+
+  console.log(`[ingestFinancialStatements] Processing ${stockRows.length} stocks (offset ${offset})…`);
+
+  for (const { symbol } of stockRows) {
+    try {
+      const quarters = await fetchStockFinancials(symbol);
+      if (quarters.length === 0) {
+        errors.push(`No financial data returned for ${symbol}`);
+        await sleep(150);
+        continue;
+      }
+
+      const latest = quarters[quarters.length - 1];
+
+      // Find the same fiscal quarter one year earlier (exact date match,
+      // since quarter-end dates are consistent, e.g. "2025-09-30" → "2024-09-30")
+      const latestDate = new Date(latest.date);
+      const priorYearDate = new Date(latestDate);
+      priorYearDate.setFullYear(priorYearDate.getFullYear() - 1);
+      const priorDateStr = priorYearDate.toISOString().slice(0, 10);
+      const prior = quarters.find(q => q.date === priorDateStr);
+
+      const epsGrowth =
+        prior?.eps != null && latest.eps != null && prior.eps !== 0
+          ? Math.round(((latest.eps - prior.eps) / Math.abs(prior.eps)) * 10000) / 100
+          : null;
+
+      const roe =
+        latest.netIncome != null && latest.equity != null && latest.equity !== 0
+          ? Math.round((latest.netIncome / latest.equity) * 10000) / 100
+          : null;
+
+      // Derive fiscal quarter period from the latest report's own date
+      const [yearStr, monthStr] = latest.date.split('-');
+      const period = `${yearStr}Q${Math.ceil(parseInt(monthStr, 10) / 3)}`;
+
+      await queryUnsafe(
+        `INSERT INTO fundamentals (symbol, period, eps_growth_yoy, roe)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (symbol, period) DO UPDATE
+           SET eps_growth_yoy = COALESCE($3, fundamentals.eps_growth_yoy),
+               roe            = COALESCE($4, fundamentals.roe)`,
+        [symbol, period, epsGrowth, roe],
+      );
+      count++;
+    } catch (err) {
+      const msg = `[ingestFinancialStatements] Failed for ${symbol}: ${err}`;
+      console.error(msg);
+      errors.push(msg);
+    }
+
+    // Pace requests to stay comfortably under FinMind's rate limit
+    await sleep(150);
+  }
+
+  console.log(`[ingestFinancialStatements] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors.`);
+  return { count, errors, totalStocks };
 }
