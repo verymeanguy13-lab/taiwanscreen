@@ -88,7 +88,7 @@ async function fetchTWSEPricesForDate(twseDate: string): Promise<PriceRow[]> {
       const high       = clean(row[6]);
       const low        = clean(row[7]);
       const close      = clean(row[8]);
-      const sign       = row[9]?.trim() === '-' ? -1 : 1;
+      const sign = (row[9]?.includes('-') && !row[9]?.includes('+')) ? -1 : 1;
       const change_amt = sign * clean(row[10]);
       const change_pct = open > 0 ? Math.round((change_amt / (close - change_amt)) * 10000) / 100 : 0;
 
