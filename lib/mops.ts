@@ -147,9 +147,17 @@ export async function fetchMonthlyRevenue(
   try {
     const rocYear = toROCYear(year);
     const raw = await mopsFetch('/mops/web/ajax_t05st10', {
-      year:  String(rocYear),
-      month: String(month),
-      type:  'sii',
+      encodeURIComponent: '1',
+      step:     '1',
+      firstin:  '1',
+      off:      '1',
+      keyword4: '',
+      code1:    '',
+      TYPEK:    'sii',
+      isnew:    'false',
+      year:     String(rocYear),
+      month:    String(month),
+      type:     'sii',
     });
 
     if (!raw) return [];
