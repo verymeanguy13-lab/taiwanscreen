@@ -1,11 +1,11 @@
 // =============================================================================
 // app/api/admin/debug-revenue/route.ts
-// TEMPORARY debug endpoint — fetches the raw MOPS response for monthly revenue
-// and returns it as plain text so it can be inspected directly in a browser.
-// Safe to delete once the revenue ingestion issue is diagnosed and fixed.
+// TEMPORARY debug endpoint — currently repurposed to test the MOPS
+// book-value/EPS endpoint (ajax_t05st22) for the same security-wall issue
+// found with the revenue endpoint. Safe to delete once diagnosed.
 //
 // Usage: visit in browser (GET request):
-//   https://taiwanscreen.vercel.app/api/admin/debug-revenue?year=2026&month=3&secret=mysecret123
+//   https://taiwanscreen.vercel.app/api/admin/debug-revenue?year=2026&season=1&secret=mysecret123
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -23,11 +23,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const year  = parseInt(searchParams.get('year')  ?? '2026', 10);
-  const month = parseInt(searchParams.get('month') ?? '3', 10);
+  const year   = parseInt(searchParams.get('year')   ?? '2026', 10);
+  const season = parseInt(searchParams.get('season') ?? '1', 10);
   const rocYear = toROCYear(year);
 
-  // Matches the exact params fetchMonthlyRevenue() now sends after the fix
   const body = new URLSearchParams({
     encodeURIComponent: '1',
     step:     '1',
@@ -38,12 +37,11 @@ export async function GET(req: NextRequest) {
     TYPEK:    'sii',
     isnew:    'false',
     year:     String(rocYear),
-    month:    String(month),
-    type:     'sii',
+    season:   String(season),
   }).toString();
 
   try {
-    const res = await fetch(`${BASE_URL}/mops/web/ajax_t05st10`, {
+    const res = await fetch(`${BASE_URL}/mops/web/ajax_t05st22`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -56,7 +54,7 @@ export async function GET(req: NextRequest) {
     const text = await res.text();
 
     return new NextResponse(
-      `STATUS: ${res.status}\nURL TRIED: ${BASE_URL}/mops/web/ajax_t05st10\nBODY SENT: ${body}\n\n--- RAW RESPONSE (first 5000 chars) ---\n\n${text.slice(0, 5000)}`,
+      `STATUS: ${res.status}\nURL TRIED: ${BASE_URL}/mops/web/ajax_t05st22\nBODY SENT: ${body}\n\n--- RAW RESPONSE (first 5000 chars) ---\n\n${text.slice(0, 5000)}`,
       { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
     );
   } catch (err) {
