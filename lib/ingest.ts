@@ -396,31 +396,42 @@ export async function ingestFundamentalsBalanceSheet(
 }
 
 // =============================================================================
-// ingestMonthlyRevenue — fetches monthly revenue + YoY growth from MOPS and
-// saves revenue_growth_yoy into the fundamentals table for the current
-// fiscal quarter (matching how other fundamentals fields are stored).
+// ingestMonthlyRevenue — fetches the latest published monthly revenue + YoY
+// growth from TWSE's official OpenAPI and saves revenue_growth_yoy into the
+// fundamentals table under the fiscal quarter the data actually covers.
+//
+// NOTE: TWSE only serves the most recently published month — it does not
+// support requesting a specific past month — so this function takes no
+// parameters. It always ingests whatever is currently available.
 // =============================================================================
 
-export async function ingestMonthlyRevenue(
-  year: number,
-  month: number,
-): Promise<IngestResult> {
+export async function ingestMonthlyRevenue(): Promise<IngestResult> {
   const errors: string[] = [];
   let count = 0;
 
-  console.log(`[ingestMonthlyRevenue] Fetching revenue for ${year}-${String(month).padStart(2, '0')}…`);
-  const records = await fetchMonthlyRevenue(year, month);
+  console.log('[ingestMonthlyRevenue] Fetching latest monthly revenue from TWSE OpenAPI…');
+  const records = await fetchMonthlyRevenue();
   console.log(`[ingestMonthlyRevenue] Fetched ${records.length} records.`);
 
   if (records.length === 0) {
-    return { count: 0, errors: [`No revenue data returned from MOPS for ${year}-${month}`] };
+    return { count: 0, errors: ['No revenue data returned from TWSE OpenAPI'] };
   }
 
-  // File under the current calendar quarter, same convention as ingestFundamentals()
-  const now     = new Date();
-  const qYear   = now.getFullYear();
-  const quarter = Math.ceil((now.getMonth() + 1) / 3);
-  const period  = `${qYear}Q${quarter}`;
+  // Derive the fiscal quarter from the data's own reported period (e.g. "11505"
+  // = ROC year 115, month 05 = May 2026), rather than today's date, since TWSE
+  // publishes with a lag (May's data appears in mid-June, etc).
+  const sampleYYYMM = records[0].periodYYYMM;
+  let period: string;
+  if (/^\d{5,6}$/.test(sampleYYYMM)) {
+    const month       = parseInt(sampleYYYMM.slice(-2), 10);
+    const rocYear     = parseInt(sampleYYYMM.slice(0, sampleYYYMM.length - 2), 10);
+    const westernYear = rocYear + 1911;
+    const quarter     = Math.ceil(month / 3);
+    period = `${westernYear}Q${quarter}`;
+  } else {
+    const now = new Date();
+    period = `${now.getFullYear()}Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+  }
 
   for (const r of records) {
     try {
@@ -439,6 +450,6 @@ export async function ingestMonthlyRevenue(
     }
   }
 
-  console.log(`[ingestMonthlyRevenue] Done. Upserted ${count} rows, ${errors.length} errors.`);
+  console.log(`[ingestMonthlyRevenue] Done. Upserted ${count} rows under period ${period}, ${errors.length} errors.`);
   return { count, errors };
 }

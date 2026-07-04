@@ -138,49 +138,52 @@ function extractHTML(raw: string): string {
 
 // -----------------------------------------------------------------------------
 // 1. fetchMonthlyRevenue
+//
+// NOTE: previously called MOPS's consumer-portal ajax endpoint
+// (mops.twse.com.tw/mops/web/ajax_t05st10), which is now referer-walled and
+// returns a "FOR SECURITY REASONS" block page for automated requests.
+//
+// Rewritten to use the official TWSE OpenAPI instead (t187ap05_L), which
+// mirrors the same monthly-revenue disclosure data without that wall.
+// This endpoint only serves the most recently published month — it does not
+// support querying arbitrary past months — so it takes no parameters.
 // -----------------------------------------------------------------------------
 
-export async function fetchMonthlyRevenue(
-  year: number,
-  month: number,
-): Promise<{ symbol: string; revenue: number; yoy_growth: number }[]> {
+export async function fetchMonthlyRevenue(): Promise<
+  { symbol: string; name_zh: string; revenue: number; yoy_growth: number; periodYYYMM: string }[]
+> {
   try {
-    const rocYear = toROCYear(year);
-    const raw = await mopsFetch('/mops/web/ajax_t05st10', {
-      encodeURIComponent: '1',
-      step:     '1',
-      firstin:  '1',
-      off:      '1',
-      keyword4: '',
-      code1:    '',
-      TYPEK:    'sii',
-      isnew:    'false',
-      year:     String(rocYear),
-      month:    String(month),
-      type:     'sii',
+    const res = await fetch('https://openapi.twse.com.tw/v1/opendata/t187ap05_L', {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
     });
 
-    if (!raw) return [];
-
-    const html = extractHTML(raw);
-    const rows = parseHTMLTable(html);
-
-    // Skip header rows (first 1–2 rows are typically headers)
-    // Expected columns: 公司代號, 公司名稱, 當月營收, 上月營收, 去年當月營收,
-    //                   上月比較增減(%), 去年同月增減(%), ...
-    const results: { symbol: string; revenue: number; yoy_growth: number }[] = [];
-
-    for (const row of rows) {
-      const symbol = row[0]?.trim();
-      // Skip header/footer rows — symbol should be a numeric code
-      if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
-
-      const revenue    = parseFloat((row[2] ?? '0').replace(/,/g, '')) || 0;
-      const yoy_growth = parseFloat((row[6] ?? '0').replace(/,/g, '')) || 0;
-
-      results.push({ symbol, revenue, yoy_growth });
+    if (!res.ok) {
+      console.error(`[fetchMonthlyRevenue] HTTP ${res.status}`);
+      return [];
     }
 
+    const json = await res.json();
+    if (!Array.isArray(json)) {
+      console.error('[fetchMonthlyRevenue] Non-array response from TWSE OpenAPI');
+      return [];
+    }
+
+    const results: { symbol: string; name_zh: string; revenue: number; yoy_growth: number; periodYYYMM: string }[] = [];
+
+    for (const row of json as Record<string, string>[]) {
+      const symbol = row['公司代號']?.trim();
+      if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+
+      const name_zh     = row['公司名稱']?.trim() ?? '';
+      const revenue     = parseFloat((row['營業收入-當月營收'] ?? '0').replace(/,/g, '')) || 0;
+      const yoy_growth  = parseFloat((row['營業收入-去年同月增減(%)'] ?? '0').replace(/,/g, '')) || 0;
+      const periodYYYMM = row['資料年月']?.trim() ?? '';
+
+      results.push({ symbol, name_zh, revenue, yoy_growth, periodYYYMM });
+    }
+
+    console.log(`[fetchMonthlyRevenue] Fetched ${results.length} stocks via TWSE OpenAPI (t187ap05_L)`);
     return results;
   } catch (err) {
     console.error('[fetchMonthlyRevenue] Unexpected error:', err);
