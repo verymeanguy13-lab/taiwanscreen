@@ -24,7 +24,7 @@ export interface QuarterlyFinancials {
  */
 export async function fetchStockFinancials(
   stockId: string,
-  monthsBack: number = 15,
+  monthsBack: number = 20,
 ): Promise<QuarterlyFinancials[]> {
   try {
     const startDate = new Date();
