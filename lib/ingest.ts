@@ -476,7 +476,7 @@ export async function ingestFinancialStatements(
 
   const remainingRow = await queryUnsafe<{ cnt: string }>(
     `SELECT COUNT(*) as cnt FROM stocks s
-     WHERE s.market IN ('TWSE', 'TPEx')
+     WHERE s.market IN ('TWSE', 'TPEx') AND s.symbol NOT LIKE '00%' AND s.symbol NOT LIKE '00%'
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
@@ -487,7 +487,7 @@ export async function ingestFinancialStatements(
 
   const stockRows = await queryUnsafe<{ symbol: string }>(
     `SELECT s.symbol FROM stocks s
-     WHERE s.market IN ('TWSE', 'TPEx')
+     WHERE s.market IN ('TWSE', 'TPEx') AND s.symbol NOT LIKE '00%' AND s.symbol NOT LIKE '00%'
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
@@ -581,7 +581,7 @@ export async function ingestBalanceSheetFinMind(
 
   const remainingRow = await queryUnsafe<{ cnt: string }>(
     `SELECT COUNT(*) as cnt FROM stocks s
-     WHERE s.market IN ('TWSE', 'TPEx')
+     WHERE s.market IN ('TWSE', 'TPEx') AND s.symbol NOT LIKE '00%' AND s.symbol NOT LIKE '00%'
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol
@@ -593,7 +593,7 @@ export async function ingestBalanceSheetFinMind(
 
   const stockRows = await queryUnsafe<{ symbol: string }>(
     `SELECT s.symbol FROM stocks s
-     WHERE s.market IN ('TWSE', 'TPEx')
+     WHERE s.market IN ('TWSE', 'TPEx') AND s.symbol NOT LIKE '00%' AND s.symbol NOT LIKE '00%'
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol
