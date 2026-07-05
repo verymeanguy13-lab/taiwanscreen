@@ -1,19 +1,21 @@
 // =============================================================================
 // app/api/admin/ingest-balance-sheet/route.ts
-// Manually triggers a batch of debt_ratio + pb_ratio ingestion from FinMind,
-// replacing the old MOPS-based ingestFundamentalsBalanceSheet() (which is
-// blocked by MOPS's referer-wall — see Session 74 notes).
-// Processes stocks in pages since FinMind's free tier is rate-limited and
-// there are ~1,100 stocks — call repeatedly with increasing offset to cover
-// the full list (e.g. offset=0, then 200, then 400, ...).
+// Manually (or cron-) triggers a batch of debt_ratio + pb_ratio ingestion
+// from FinMind, replacing the old MOPS-based ingestFundamentalsBalanceSheet()
+// (blocked by MOPS's referer-wall — see Session 74 notes).
 //
-// Usage: POST with header x-cron-secret, JSON body { offset, limit }
-//   - offset: which stock to start from (default 0)
-//   - limit:  how many stocks to process this call (default 150)
+// Self-resuming: each call automatically picks the next batch of stocks that
+// don't have debt_ratio or pb_ratio yet — no offset tracking needed. Call
+// repeatedly (e.g. a recurring cron-job.org job) until "remaining": 0.
+//
+// Usage: POST with header x-cron-secret, JSON body { limit }
+//   - limit: how many stocks to process this call (default 60)
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { ingestBalanceSheetFinMind } from '@/lib/ingest';
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret');
@@ -22,19 +24,16 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const offset = typeof body?.offset === 'number' ? body.offset : 0;
-  const limit  = typeof body?.limit  === 'number' ? body.limit  : 150;
+  const limit = typeof body?.limit === 'number' ? body.limit : 60;
 
-  const result = await ingestBalanceSheetFinMind(offset, limit);
+  const result = await ingestBalanceSheetFinMind(limit);
 
   return NextResponse.json({
     success: true,
-    offset,
     limit,
     processedThisBatch: result.count,
-    totalStocks: result.totalStocks,
-    nextOffset: offset + limit,
-    done: offset + limit >= result.totalStocks,
+    remaining: result.remaining,
+    done: result.remaining === 0,
     errors: result.errors,
   });
 }

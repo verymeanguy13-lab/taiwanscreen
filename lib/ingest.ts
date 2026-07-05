@@ -458,34 +458,46 @@ export async function ingestMonthlyRevenue(): Promise<IngestResult> {
 // from FinMind for a batch of stocks, computes eps_growth_yoy (vs. same
 // quarter one year ago) and roe, and saves both into the fundamentals table.
 //
-// Processes stocks in batches (offset/limit) since FinMind's free tier is
-// rate-limited (~600 requests/hour with a token) and there are ~1,100 stocks —
-// call this repeatedly (e.g. via cron-job.org every few minutes) to work
-// through the full list over time.
+// Self-resuming: instead of offset/limit pagination, each call picks the next
+// batch of stocks that don't have eps_growth_yoy filled in yet. Call this
+// repeatedly (e.g. via a recurring cron-job.org job, same pattern as
+// update-signals) and it naturally works through the full ~1,100-stock list
+// over time without needing to track progress yourself. Note: ETFs and a few
+// other symbols will never have this data (FinMind has none for them) — they
+// get retried harmlessly on every call, which costs a wasted API call each
+// time but doesn't block progress on real stocks.
 // =============================================================================
 
 export async function ingestFinancialStatements(
-  offset: number,
   limit: number,
-): Promise<IngestResult & { totalStocks: number }> {
+): Promise<IngestResult & { remaining: number }> {
   const errors: string[] = [];
   let count = 0;
 
-  const totalRow = await queryUnsafe<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM stocks WHERE market IN ('TWSE', 'TPEx')`,
+  const remainingRow = await queryUnsafe<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM stocks s
+     WHERE s.market IN ('TWSE', 'TPEx')
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals f
+         WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
+       )`,
     [],
   );
-  const totalStocks = parseInt(totalRow[0]?.cnt ?? '0', 10);
+  const remainingBefore = parseInt(remainingRow[0]?.cnt ?? '0', 10);
 
   const stockRows = await queryUnsafe<{ symbol: string }>(
-    `SELECT symbol FROM stocks
-     WHERE market IN ('TWSE', 'TPEx')
-     ORDER BY symbol
-     LIMIT $1 OFFSET $2`,
-    [limit, offset],
+    `SELECT s.symbol FROM stocks s
+     WHERE s.market IN ('TWSE', 'TPEx')
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals f
+         WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
+       )
+     ORDER BY s.symbol
+     LIMIT $1`,
+    [limit],
   );
 
-  console.log(`[ingestFinancialStatements] Processing ${stockRows.length} stocks (offset ${offset})…`);
+  console.log(`[ingestFinancialStatements] Processing ${stockRows.length} stocks (${remainingBefore} remaining before this batch)…`);
 
   for (const { symbol } of stockRows) {
     try {
@@ -539,8 +551,9 @@ export async function ingestFinancialStatements(
     await sleep(150);
   }
 
-  console.log(`[ingestFinancialStatements] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors.`);
-  return { count, errors, totalStocks };
+  const remaining = Math.max(0, remainingBefore - count);
+  console.log(`[ingestFinancialStatements] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors, ${remaining} still remaining.`);
+  return { count, errors, remaining };
 }
 
 // =============================================================================
@@ -554,32 +567,44 @@ export async function ingestFinancialStatements(
 //   - debt_ratio is computed from FinMind's TaiwanStockBalanceSheet dataset
 //     (totalLiabilities / totalAssets × 100).
 //
-// Same offset/limit batching pattern as ingestFinancialStatements, since
-// FinMind requires one call per stock on the free tier.
+// Self-resuming, same pattern as ingestFinancialStatements: each call picks
+// the next batch of stocks missing both debt_ratio and pb_ratio. Call
+// repeatedly (e.g. via a recurring cron-job.org job) to work through the
+// full list over time without tracking an offset yourself.
 // =============================================================================
 
 export async function ingestBalanceSheetFinMind(
-  offset: number,
   limit: number,
-): Promise<IngestResult & { totalStocks: number }> {
+): Promise<IngestResult & { remaining: number }> {
   const errors: string[] = [];
   let count = 0;
 
-  const totalRow = await queryUnsafe<{ cnt: string }>(
-    `SELECT COUNT(*) as cnt FROM stocks WHERE market IN ('TWSE', 'TPEx')`,
+  const remainingRow = await queryUnsafe<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM stocks s
+     WHERE s.market IN ('TWSE', 'TPEx')
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals f
+         WHERE f.symbol = s.symbol
+           AND (f.debt_ratio IS NOT NULL OR f.pb_ratio IS NOT NULL)
+       )`,
     [],
   );
-  const totalStocks = parseInt(totalRow[0]?.cnt ?? '0', 10);
+  const remainingBefore = parseInt(remainingRow[0]?.cnt ?? '0', 10);
 
   const stockRows = await queryUnsafe<{ symbol: string }>(
-    `SELECT symbol FROM stocks
-     WHERE market IN ('TWSE', 'TPEx')
-     ORDER BY symbol
-     LIMIT $1 OFFSET $2`,
-    [limit, offset],
+    `SELECT s.symbol FROM stocks s
+     WHERE s.market IN ('TWSE', 'TPEx')
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals f
+         WHERE f.symbol = s.symbol
+           AND (f.debt_ratio IS NOT NULL OR f.pb_ratio IS NOT NULL)
+       )
+     ORDER BY s.symbol
+     LIMIT $1`,
+    [limit],
   );
 
-  console.log(`[ingestBalanceSheetFinMind] Processing ${stockRows.length} stocks (offset ${offset})…`);
+  console.log(`[ingestBalanceSheetFinMind] Processing ${stockRows.length} stocks (${remainingBefore} remaining before this batch)…`);
 
   for (const { symbol } of stockRows) {
     try {
@@ -635,6 +660,7 @@ export async function ingestBalanceSheetFinMind(
     await sleep(150);
   }
 
-  console.log(`[ingestBalanceSheetFinMind] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors.`);
-  return { count, errors, totalStocks };
+  const remaining = Math.max(0, remainingBefore - count);
+  console.log(`[ingestBalanceSheetFinMind] Done. Upserted ${count}/${stockRows.length} rows, ${errors.length} errors, ${remaining} still remaining.`);
+  return { count, errors, remaining };
 }
