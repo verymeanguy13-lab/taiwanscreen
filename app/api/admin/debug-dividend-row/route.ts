@@ -1,9 +1,8 @@
 // app/api/admin/debug-dividend-row/route.ts
 //
-// TEMPORARY debug tool — shows the raw dividend_summary row for a symbol,
-// plus a breakdown of how many stocks meet various consecutive_years/yield
-// thresholds, to diagnose why 存股族 backtest shows 0 samples.
-// Delete once confirmed.
+// TEMPORARY debug tool — shows dividend_summary + raw dividends rows for a
+// symbol, plus a market-wide breakdown, to diagnose why consecutive_years
+// is stuck near 0 for every stock. Delete once confirmed.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
@@ -16,8 +15,16 @@ export async function POST(req: NextRequest) {
 
   const symbol = req.nextUrl.searchParams.get('symbol') ?? '0050';
 
-  const rows = await queryUnsafe(
+  const summary = await queryUnsafe(
     `SELECT * FROM dividend_summary WHERE symbol = $1`,
+    [symbol],
+  );
+
+  const rawDividends = await queryUnsafe(
+    `SELECT symbol, year, period, cash_dividend, stock_dividend, ex_dividend_date, payment_date
+     FROM dividends
+     WHERE symbol = $1
+     ORDER BY year DESC, period DESC`,
     [symbol],
   );
 
@@ -31,5 +38,5 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  return NextResponse.json({ symbol, rows, counts });
+  return NextResponse.json({ symbol, summary, rawDividends, counts });
 }
