@@ -492,7 +492,7 @@ export async function ingestFinancialStatements(
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
        )
-     ORDER BY s.symbol
+     ORDER BY RANDOM()
      LIMIT $1`,
     [limit],
   );
@@ -599,7 +599,7 @@ export async function ingestBalanceSheetFinMind(
          WHERE f.symbol = s.symbol
            AND (f.debt_ratio IS NOT NULL OR f.pb_ratio IS NOT NULL)
        )
-     ORDER BY s.symbol
+     ORDER BY RANDOM()
      LIMIT $1`,
     [limit],
   );
