@@ -43,7 +43,7 @@ export async function POST() {
         }>(
           `SELECT date, open, high, low, close, volume
            FROM daily_prices WHERE symbol = $1
-           ORDER BY date DESC LIMIT 60`,
+           ORDER BY date DESC LIMIT 90`,
           [symbol],
         );
         if (rows.length < 20) return;

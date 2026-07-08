@@ -73,7 +73,10 @@ export function detectUptrendBreakout(
   indicators: IndicatorSnapshot,
 ): BreakoutSignal | null {
   const n = candles.length;
-  if (n < 61) return null;
+  // Needs 5 consecutive valid 60-day SMA values ending at the latest candle.
+  // sma(closes, 60) only becomes non-null from index 59 onward, so the last
+  // 5 indices (n-1 .. n-5) all being valid requires n-5 >= 59, i.e. n >= 64.
+  if (n < 64) return null;
 
   const { sma5, sma20, sma60, rsi14, macd: macdData } = indicators;
   const today = candles[n - 1];
@@ -361,4 +364,3 @@ export function detectAllBreakouts(
 
   return results.sort((a, b) => b.confidence - a.confidence);
 }
-
