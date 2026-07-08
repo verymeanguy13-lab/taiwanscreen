@@ -2,6 +2,12 @@
 // app/api/cron/weekly/route.ts
 // Triggered by Vercel Cron at 10:00 UTC on Saturdays = 6:00pm Taiwan time.
 // Recomputes dividend_summary for all stocks with dividend history.
+//
+// NOTE: does NOT touch latest_yield_pct — that field is owned by the
+// separate TWSE-based pipeline (ingestFundamentals, runs daily). This job
+// previously overwrote it with 0 every run because the FinMind-sourced
+// `dividends.yield_pct` column is never actually populated by ingest-dividends,
+// so the lookup always failed and silently zeroed out the real value.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -36,10 +42,9 @@ export async function GET(req: NextRequest) {
         year: number;
         period: string;
         cash_dividend: number;
-        yield_pct: number;
         ex_dividend_date: string;
       }>(
-        `SELECT year, period, cash_dividend, yield_pct, ex_dividend_date
+        `SELECT year, period, cash_dividend, ex_dividend_date
          FROM dividends
          WHERE symbol = $1
          ORDER BY year DESC, period DESC`,
@@ -65,10 +70,6 @@ export async function GET(req: NextRequest) {
           break;
         }
       }
-
-      // ── latest_yield_pct ─────────────────────────────────────────────────
-      const latestWithYield = rows.find(r => r.yield_pct != null && r.yield_pct > 0);
-      const latest_yield_pct = latestWithYield?.yield_pct ?? 0;
 
       // ── last_cash_dividend ───────────────────────────────────────────────
       const latestCash = rows.find(r => (r.cash_dividend ?? 0) > 0);
@@ -103,22 +104,20 @@ export async function GET(req: NextRequest) {
         : 0;
       const stability_score = Math.min(baseScore + consistencyBonus + frequencyBonus, 100);
 
-      // ── Upsert dividend_summary ──────────────────────────────────────────
+      // ── Upsert dividend_summary (latest_yield_pct intentionally excluded) ─
       await queryUnsafe(
         `INSERT INTO dividend_summary
-           (symbol, latest_yield_pct, consecutive_years, dividend_frequency,
+           (symbol, consecutive_years, dividend_frequency,
             stability_score, next_ex_date, last_cash_dividend)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (symbol) DO UPDATE
-           SET latest_yield_pct   = EXCLUDED.latest_yield_pct,
-               consecutive_years  = EXCLUDED.consecutive_years,
+           SET consecutive_years  = EXCLUDED.consecutive_years,
                dividend_frequency = EXCLUDED.dividend_frequency,
                stability_score    = EXCLUDED.stability_score,
                next_ex_date       = EXCLUDED.next_ex_date,
                last_cash_dividend = EXCLUDED.last_cash_dividend`,
         [
           symbol,
-          latest_yield_pct,
           consecutiveYears,
           dividend_frequency,
           stability_score,
