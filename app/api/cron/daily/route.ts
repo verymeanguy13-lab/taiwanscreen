@@ -317,6 +317,47 @@ export async function GET(req: NextRequest) {
     console.error('[daily] signal-scan cursor error:', err);
   }
 
+  // ── Dividend ingestion: rotate through the whole stock universe over time ─
+  // Same bookmark pattern as signal detection above, using a separate key
+  // in the same cron_state table. Fetches real dividend history from FinMind
+  // per stock, then recalculates dividend_summary (連續配息年 / 穩定分數 /
+  // 配息頻率 / 近期除息日). Previously this only ran when manually triggered,
+  // which is why almost every stock was missing these fields.
+  // 5 sub-batches x 20 stocks = 100/day (~20 days for a full market pass).
+  try {
+    const [totalRow2] = await sql`SELECT COUNT(*)::int AS n FROM stocks`;
+    const totalStocks2 = Number(totalRow2?.n ?? 0);
+
+    const [cursorRow2] = await sql`
+      SELECT value FROM cron_state WHERE key = 'dividend_ingest_offset'
+    `;
+    const cursor2 = Number(cursorRow2?.value ?? 0);
+
+    const DIV_BATCH_SIZE  = 20;  // matches the hardcoded limit inside ingest-dividends
+    const DIV_NUM_BATCHES = 5;   // 5 x 20 = 100 stocks/day
+    const DIV_DAILY_TOTAL = DIV_BATCH_SIZE * DIV_NUM_BATCHES;
+
+    if (totalStocks2 > 0) {
+      for (let i = 0; i < DIV_NUM_BATCHES; i++) {
+        const batchOffset = (cursor2 + i * DIV_BATCH_SIZE) % totalStocks2;
+        fetch(`${base}/api/admin/ingest-dividends?offset=${batchOffset}`, {
+          method: 'POST',
+          headers: cronHeader,
+        }).catch(err => console.error(`[daily] ingest-dividends batch offset=${batchOffset} error:`, err));
+      }
+
+      const nextCursor2 = (cursor2 + DIV_DAILY_TOTAL) % totalStocks2;
+      await sql`
+        INSERT INTO cron_state (key, value)
+        VALUES ('dividend_ingest_offset', ${nextCursor2})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `;
+      console.log(`[cron/daily] Dividend ingest: offset ${cursor2} -> ${nextCursor2} (of ${totalStocks2} stocks)`);
+    }
+  } catch (err) {
+    console.error('[daily] dividend-ingest cursor error:', err);
+  }
+
   fetch(`${base}/api/kline/afterhours?side=bull`, {
     headers: cronHeader,
   }).catch(err => console.error('[daily] afterhours bull error:', err));

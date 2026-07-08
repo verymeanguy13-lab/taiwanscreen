@@ -124,13 +124,16 @@ export async function POST(req: NextRequest) {
   const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0', 10);
   const limit  = 20;
 
+  // Sorted by symbol (stable) rather than trading volume (which fluctuates
+  // day to day) — this keeps each day's batch predictable so the rotation
+  // cursor in cron/daily doesn't skip or double-process stocks.
   const stocks = await queryUnsafe<{ symbol: string }>(
     `SELECT s.symbol
      FROM stocks s
      JOIN daily_prices dp ON dp.symbol = s.symbol
      WHERE dp.date >= NOW() - INTERVAL '30 days'
      GROUP BY s.symbol
-     ORDER BY AVG(dp.volume) DESC
+     ORDER BY s.symbol
      LIMIT $1 OFFSET $2`,
     [limit, offset],
   );
