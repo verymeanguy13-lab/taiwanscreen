@@ -272,10 +272,50 @@ export async function GET(req: NextRequest) {
     headers: cronHeader,
   }).catch(err => console.error('[daily] alerts cron error:', err));
 
-  fetch(`${base}/api/admin/detect-signals?offset=0&limit=200`, {
-    method: 'POST',
-    headers: cronHeader,
-  }).catch(err => console.error('[daily] detect-signals error:', err));
+  // ── Signal detection: rotate through the whole stock universe over time ───
+  // Each day we advance a persisted "bookmark" (stored in a small cron_state
+  // table) so a different slice of the market gets scanned daily, instead of
+  // always re-scanning the same 5 stocks. 5 sub-batches x 15 stocks = 75/day.
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS cron_state (
+        key   TEXT PRIMARY KEY,
+        value INTEGER NOT NULL DEFAULT 0
+      )
+    `;
+
+    const [totalRow] = await sql`SELECT COUNT(*)::int AS n FROM stocks`;
+    const totalStocks = Number(totalRow?.n ?? 0);
+
+    const [cursorRow] = await sql`
+      SELECT value FROM cron_state WHERE key = 'signal_scan_offset'
+    `;
+    const cursor = Number(cursorRow?.value ?? 0);
+
+    const BATCH_SIZE  = 15;  // stocks per sub-batch (stays under the 10s Vercel timeout)
+    const NUM_BATCHES = 5;   // 5 x 15 = 75 stocks/day
+    const DAILY_TOTAL = BATCH_SIZE * NUM_BATCHES;
+
+    if (totalStocks > 0) {
+      for (let i = 0; i < NUM_BATCHES; i++) {
+        const batchOffset = (cursor + i * BATCH_SIZE) % totalStocks;
+        fetch(`${base}/api/admin/detect-signals?offset=${batchOffset}&limit=${BATCH_SIZE}`, {
+          method: 'POST',
+          headers: cronHeader,
+        }).catch(err => console.error(`[daily] detect-signals batch offset=${batchOffset} error:`, err));
+      }
+
+      const nextCursor = (cursor + DAILY_TOTAL) % totalStocks;
+      await sql`
+        INSERT INTO cron_state (key, value)
+        VALUES ('signal_scan_offset', ${nextCursor})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `;
+      console.log(`[cron/daily] Signal scan: offset ${cursor} -> ${nextCursor} (of ${totalStocks} stocks)`);
+    }
+  } catch (err) {
+    console.error('[daily] signal-scan cursor error:', err);
+  }
 
   fetch(`${base}/api/kline/afterhours?side=bull`, {
     headers: cronHeader,

@@ -1,7 +1,9 @@
 // =============================================================================
 // app/api/admin/detect-signals/route.ts
-// POST /api/admin/detect-signals?offset=0
-// Reduced to 5 stocks per batch to stay within Vercel 10s timeout
+// POST /api/admin/detect-signals?offset=0&limit=15
+// limit is now configurable via the URL, capped at 25 to stay within
+// Vercel's 10s timeout on the Hobby plan (was previously hardcoded to 5,
+// ignoring whatever was passed in the URL).
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,7 +21,8 @@ export async function POST(req: NextRequest) {
     }
 
     const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0', 10);
-    const limit  = 5; // 5 stocks per batch — safe within 10s timeout
+    const limitParam = parseInt(req.nextUrl.searchParams.get('limit') ?? '5', 10);
+    const limit = Math.min(Math.max(limitParam, 1), 25); // clamp 1–25 for safety
 
     const dateRow = await queryUnsafe<{ max: string }>(
       `SELECT MAX(date)::text AS max FROM daily_prices`,
