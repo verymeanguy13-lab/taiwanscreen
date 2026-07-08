@@ -134,8 +134,16 @@ export async function POST(req: NextRequest) {
       `SELECT s.symbol, s.name_zh
        FROM stocks s
        LEFT JOIN daily_prices dp ON s.symbol = dp.symbol
-       LEFT JOIN fundamentals f ON s.symbol = f.symbol
-         AND f.period = (SELECT MAX(period) FROM fundamentals WHERE symbol = s.symbol)
+       LEFT JOIN LATERAL (
+         SELECT
+           (SELECT pe_ratio           FROM fundamentals WHERE symbol = s.symbol AND pe_ratio           IS NOT NULL ORDER BY period DESC LIMIT 1) AS pe_ratio,
+           (SELECT pb_ratio           FROM fundamentals WHERE symbol = s.symbol AND pb_ratio           IS NOT NULL ORDER BY period DESC LIMIT 1) AS pb_ratio,
+           (SELECT roe                FROM fundamentals WHERE symbol = s.symbol AND roe                IS NOT NULL ORDER BY period DESC LIMIT 1) AS roe,
+           (SELECT gross_margin       FROM fundamentals WHERE symbol = s.symbol AND gross_margin       IS NOT NULL ORDER BY period DESC LIMIT 1) AS gross_margin,
+           (SELECT debt_ratio         FROM fundamentals WHERE symbol = s.symbol AND debt_ratio         IS NOT NULL ORDER BY period DESC LIMIT 1) AS debt_ratio,
+           (SELECT eps_growth_yoy     FROM fundamentals WHERE symbol = s.symbol AND eps_growth_yoy     IS NOT NULL ORDER BY period DESC LIMIT 1) AS eps_growth_yoy,
+           (SELECT revenue_growth_yoy FROM fundamentals WHERE symbol = s.symbol AND revenue_growth_yoy IS NOT NULL ORDER BY period DESC LIMIT 1) AS revenue_growth_yoy
+       ) f ON true
        LEFT JOIN institutional_flows i ON s.symbol = i.symbol
        LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
        ${whereClause}
