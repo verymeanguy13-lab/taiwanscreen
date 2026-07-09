@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
     const startDate = '2024-01-01';
     let count  = 0;
     let errors = 0;
+    const failed: { symbol: string; error: string }[] = [];
 
     await Promise.all(stocks.map(async ({ symbol, close }) => {
       try {
@@ -151,8 +152,10 @@ export async function POST(req: NextRequest) {
           count++;
         }
       } catch (err) {
-        console.error(`[ingest-fundamentals] Failed for ${symbol}:`, err);
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[ingest-fundamentals] Failed for ${symbol}:`, message);
         errors++;
+        failed.push({ symbol, error: message });
       }
     }));
 
@@ -160,7 +163,7 @@ export async function POST(req: NextRequest) {
       ok: true, offset,
       processed: stocks.length,
       next_offset: offset + 20,
-      count, errors,
+      count, errors, failed,
     });
 
   } catch (err) {
