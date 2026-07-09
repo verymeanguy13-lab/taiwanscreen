@@ -1,8 +1,8 @@
 // app/api/admin/debug-dividend-row/route.ts
 //
-// TEMPORARY debug tool — checks true unlimited counts of stocks matching
-// backtest filter criteria, to see if the hardcoded LIMIT 200 in the
-// backtest query is silently truncating real results. Delete once confirmed.
+// TEMPORARY debug tool — combined checks used throughout tonight's session:
+// dividend data, backtest filter counts, 6901's position in the stock list,
+// and the scope of the negative-revenue margin bug. Delete once confirmed.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
@@ -42,5 +42,23 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  return NextResponse.json({ roeCheck, growthCheck });
+  // 6901's position in the alphabetically-sorted stock list, to know which
+  // offset/batch will actually reach it
+  const positionCheck = await queryUnsafe(
+    `SELECT COUNT(*)::int AS offset_for_6901 FROM stocks WHERE symbol < '6901'`,
+    [],
+  );
+
+  // How widespread the negative-revenue margin bug actually was/is
+  const scopeCheck = await queryUnsafe(
+    `SELECT
+       COUNT(DISTINCT symbol) FILTER (WHERE revenue < 0)        AS negative_revenue_stocks,
+       COUNT(*)               FILTER (WHERE revenue < 0)        AS negative_revenue_rows,
+       COUNT(*)               FILTER (WHERE gross_margin = 100) AS bogus_100pct_gross_margin_rows,
+       COUNT(DISTINCT symbol) FILTER (WHERE gross_margin = 100) AS bogus_100pct_gross_margin_stocks
+     FROM fundamentals`,
+    [],
+  );
+
+  return NextResponse.json({ roeCheck, growthCheck, positionCheck, scopeCheck });
 }
