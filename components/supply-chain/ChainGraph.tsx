@@ -35,15 +35,15 @@ interface ChainGraphProps {
   highlightedSymbol?: string | null;
 }
 
-// ── Color scale (matches heatmap) ─────────────────────────────────────────────
+// ── Color scale (matches heatmap — Taiwan convention: red = up, green = down) ──
 function changeToColor(pct: number | null): string {
   if (pct == null) return '#4A4F6A';
-  if (pct >=  5)   return '#005F46';
-  if (pct >=  2)   return '#00D4AA';
-  if (pct >=  0)   return '#4DFFCC';
-  if (pct >= -2)   return '#FF9AA2';
-  if (pct >= -5)   return '#FF4D6D';
-  return '#7B0000';
+  if (pct >=  5)   return '#7B0000';
+  if (pct >=  2)   return '#FF4D6D';
+  if (pct >=  0)   return '#FF9AA2';
+  if (pct >= -2)   return '#4DFFCC';
+  if (pct >= -5)   return '#00D4AA';
+  return '#005F46';
 }
 
 export function ChainGraph({ nodes, edges, onNodeClick, highlightedSymbol }: ChainGraphProps) {

@@ -119,7 +119,8 @@ export default function SupplyChainPage() {
     }
   };
 
-  const avgColor = perf.avg_change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+  // Taiwan convention: red = up, green = down (was backwards before)
+  const avgColor = perf.avg_change >= 0 ? 'var(--accent-red)' : 'var(--accent-green)';
 
   return (
     <div className="flex flex-col" style={{ backgroundColor: 'var(--bg-primary)', height: 'calc(100vh - 3.5rem)' }}>
@@ -146,8 +147,8 @@ export default function SupplyChainPage() {
         <span style={{ color: 'var(--text-secondary)' }}>
           今日{ecoLabel}供應鏈：
         </span>
-        <span style={{ color: 'var(--accent-green)' }}>上漲 {perf.up_count} 家 ▲</span>
-        <span style={{ color: 'var(--accent-red)' }}>下跌 {perf.down_count} 家 ▼</span>
+        <span style={{ color: 'var(--accent-red)' }}>上漲 {perf.up_count} 家 ▲</span>
+        <span style={{ color: 'var(--accent-green)' }}>下跌 {perf.down_count} 家 ▼</span>
         <span style={{ color: 'var(--text-muted)' }}>平盤 {perf.flat_count} 家</span>
         <span>
           平均漲跌：
@@ -158,7 +159,7 @@ export default function SupplyChainPage() {
         {perf.total_foreign_net != null && (
           <span style={{ color: 'var(--text-muted)' }}>
             外資合計：
-            <span className="num ml-1" style={{ color: perf.total_foreign_net >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+            <span className="num ml-1" style={{ color: perf.total_foreign_net >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
               {perf.total_foreign_net >= 0 ? '+' : ''}{Math.round(perf.total_foreign_net / 1000).toLocaleString('en-US')}千張
             </span>
           </span>
@@ -197,8 +198,8 @@ export default function SupplyChainPage() {
               一階供應商
             </span>
             <span className="flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: '#00D4AA' }} /> 上漲
-              <span className="inline-block h-2 w-2 rounded-full ml-1" style={{ backgroundColor: '#FF4D6D' }} /> 下跌
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: '#FF4D6D' }} /> 上漲
+              <span className="inline-block h-2 w-2 rounded-full ml-1" style={{ backgroundColor: '#00D4AA' }} /> 下跌
             </span>
             <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
               拖曳移動節點 | 滾輪縮放
