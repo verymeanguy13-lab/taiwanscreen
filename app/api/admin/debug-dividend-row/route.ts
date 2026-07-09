@@ -1,8 +1,9 @@
 // app/api/admin/debug-dividend-row/route.ts
 //
-// TEMPORARY debug tool — shows dividend_summary + raw dividends rows for a
-// symbol, plus a market-wide breakdown, to diagnose why consecutive_years
-// is stuck near 0 for every stock. Delete once confirmed.
+// TEMPORARY debug tool — dividend_summary diagnostics plus a check on how
+// many stocks currently satisfy the 高成長 backtest thresholds, to see if
+// its "0 results" is a real data issue vs a cache/display issue.
+// Delete once confirmed.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
@@ -38,5 +39,24 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  return NextResponse.json({ symbol, summary, rawDividends, counts });
+  const growthCheck = await queryUnsafe(
+    `SELECT
+       COUNT(DISTINCT symbol) FILTER (
+         WHERE eps_growth_yoy IS NOT NULL AND eps_growth_yoy >= 20
+       ) AS eps_20plus_count,
+       COUNT(DISTINCT symbol) FILTER (
+         WHERE revenue_growth_yoy IS NOT NULL AND revenue_growth_yoy >= 15
+       ) AS revenue_15plus_count,
+       COUNT(DISTINCT symbol) FILTER (
+         WHERE eps_growth_yoy IS NOT NULL AND eps_growth_yoy >= 20
+           AND symbol IN (
+             SELECT symbol FROM fundamentals
+             WHERE revenue_growth_yoy IS NOT NULL AND revenue_growth_yoy >= 15
+           )
+       ) AS both_conditions_any_period
+     FROM fundamentals`,
+    [],
+  );
+
+  return NextResponse.json({ symbol, summary, rawDividends, counts, growthCheck });
 }
