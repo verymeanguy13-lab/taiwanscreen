@@ -358,6 +358,50 @@ export async function GET(req: NextRequest) {
     console.error('[daily] dividend-ingest cursor error:', err);
   }
 
+  // ── Fundamentals ingestion: rotate through the whole stock universe ──────
+  // Same bookmark pattern again, separate key. Fetches real EPS/revenue/
+  // gross margin/net margin/growth data from FinMind per stock. Previously
+  // this only ran when manually triggered — same root problem as dividends.
+  // Uses a SMALLER daily batch than dividend ingestion (60 vs 100 stocks)
+  // because each stock here costs 2 FinMind requests (financial statements +
+  // balance sheet) instead of 1, and both jobs share the same hourly FinMind
+  // quota within this same cron run — keeping this conservative avoids the
+  // two jobs colliding on quota. Can raise later if it proves safe.
+  // 3 sub-batches x 20 stocks = 60/day (~34 days for a full market pass).
+  try {
+    const [totalRow3] = await sql`SELECT COUNT(*)::int AS n FROM stocks`;
+    const totalStocks3 = Number(totalRow3?.n ?? 0);
+
+    const [cursorRow3] = await sql`
+      SELECT value FROM cron_state WHERE key = 'fundamentals_ingest_offset'
+    `;
+    const cursor3 = Number(cursorRow3?.value ?? 0);
+
+    const FUND_BATCH_SIZE  = 20;  // matches the hardcoded limit inside ingest-fundamentals
+    const FUND_NUM_BATCHES = 3;   // 3 x 20 = 60 stocks/day
+    const FUND_DAILY_TOTAL = FUND_BATCH_SIZE * FUND_NUM_BATCHES;
+
+    if (totalStocks3 > 0) {
+      for (let i = 0; i < FUND_NUM_BATCHES; i++) {
+        const batchOffset = (cursor3 + i * FUND_BATCH_SIZE) % totalStocks3;
+        fetch(`${base}/api/admin/ingest-fundamentals?offset=${batchOffset}`, {
+          method: 'POST',
+          headers: cronHeader,
+        }).catch(err => console.error(`[daily] ingest-fundamentals batch offset=${batchOffset} error:`, err));
+      }
+
+      const nextCursor3 = (cursor3 + FUND_DAILY_TOTAL) % totalStocks3;
+      await sql`
+        INSERT INTO cron_state (key, value)
+        VALUES ('fundamentals_ingest_offset', ${nextCursor3})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `;
+      console.log(`[cron/daily] Fundamentals ingest: offset ${cursor3} -> ${nextCursor3} (of ${totalStocks3} stocks)`);
+    }
+  } catch (err) {
+    console.error('[daily] fundamentals-ingest cursor error:', err);
+  }
+
   fetch(`${base}/api/kline/afterhours?side=bull`, {
     headers: cronHeader,
   }).catch(err => console.error('[daily] afterhours bull error:', err));

@@ -1,7 +1,8 @@
 // =============================================================================
 // app/api/admin/ingest-fundamentals/route.ts
 // POST /api/admin/ingest-fundamentals?offset=0
-// Orders by trading volume DESC so biggest stocks are processed first.
+// Orders by symbol (stable) rather than trading volume, so the daily
+// rotation cursor doesn't skip or double-process stocks as volumes shift.
 // Fetches TaiwanStockBalanceSheet for debt_ratio + ROE.
 // market_cap computed from close price x shares (CapitalStock / 10).
 // =============================================================================
@@ -54,12 +55,12 @@ export async function POST(req: NextRequest) {
        LEFT JOIN daily_prices dp
          ON dp.symbol = s.symbol
          AND dp.date = (SELECT MAX(date) FROM daily_prices)
-       ORDER BY dp.volume DESC NULLS LAST
+       ORDER BY s.symbol
        LIMIT 20 OFFSET $1`,
       [offset],
     );
 
-    console.log(`[ingest-fundamentals] offset=${offset}, processing ${stocks.length} stocks by volume`);
+    console.log(`[ingest-fundamentals] offset=${offset}, processing ${stocks.length} stocks`);
 
     const startDate = '2024-01-01';
     let count  = 0;
@@ -123,14 +124,6 @@ export async function POST(req: NextRequest) {
           const eps          = fields['eps']          ?? null;
           const gross_profit = fields['gross_profit'] ?? null;
 
-          // FIX: require revenue > 0, not just !== 0. Negative revenue
-          // (common for investment-holding companies like 6901, where
-          // "revenue" reflects investment gains/losses) was producing
-          // meaningless margins — e.g. gross_profit == revenue for these
-          // entities meant gross_margin computed to exactly 100% every
-          // single quarter regardless of real performance, and net_margin
-          // swung to nonsensical values like 147.8% or -88.9% because
-          // dividing by a negative number flips and exaggerates the sign.
           const gross_margin = (gross_profit != null && revenue != null && revenue > 0)
             ? Math.round((gross_profit / revenue) * 10000) / 100 : null;
           const net_margin = (net_income != null && revenue != null && revenue > 0)
