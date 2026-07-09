@@ -15,7 +15,7 @@ import {
 interface RevenueDataPoint {
   period: string;
   revenue: number;
-  growth_yoy: number;
+  growth_yoy: number | null;
 }
 
 interface Props {

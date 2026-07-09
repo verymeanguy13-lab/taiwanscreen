@@ -260,7 +260,15 @@ export default function StockClient({ initialData }: { initialData?: any }) {
                     data={fundamentals.slice(0, 8).reverse().map(f => ({
                       period:     f.period,
                       revenue:    f.revenue ?? 0,
-                      growth_yoy: f.revenue_growth_yoy ?? 0,
+                     // Only show growth_yoy when real quarterly revenue is
+                      // also available for this period. TWSE's fast monthly
+                      // revenue feed can populate revenue_growth_yoy for a
+                      // quarter weeks before the official quarterly revenue
+                      // figure is filed — without this guard, the chart
+                      // shows a "floating" growth spike with no revenue bar
+                      // underneath it, since the two come from different,
+                      // differently-timed data sources sharing one period key.
+                      growth_yoy: f.revenue != null ? (f.revenue_growth_yoy ?? null) : null,
                     }))}
                   />
                   <EPSChart
