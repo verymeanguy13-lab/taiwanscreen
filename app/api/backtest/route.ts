@@ -130,6 +130,12 @@ export async function POST(req: NextRequest) {
     const { conditions, params } = buildWhere(filters, startDate);
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
+    // NOTE: previously had a bare `LIMIT 200` here with no ORDER BY, which
+    // silently discarded real matches in arbitrary/undefined order once
+    // more than 200 stocks qualified (confirmed: 高ROE had 1,739 true
+    // matches, 高成長 had 242 — both were being cut down to 200 arbitrarily).
+    // Removed — the downstream query already processes the whole symbol
+    // list in one bulk call, so there's no performance reason to cap here.
     const matchingRows = await queryUnsafe<{ symbol: string; name_zh: string }>(
       `SELECT s.symbol, s.name_zh
        FROM stocks s
@@ -146,8 +152,7 @@ export async function POST(req: NextRequest) {
        ) f ON true
        LEFT JOIN institutional_flows i ON s.symbol = i.symbol
        LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
-       ${whereClause}
-       LIMIT 200`,
+       ${whereClause}`,
       params,
     );
 
