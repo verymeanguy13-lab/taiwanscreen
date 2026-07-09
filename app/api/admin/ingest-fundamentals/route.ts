@@ -123,9 +123,17 @@ export async function POST(req: NextRequest) {
           const eps          = fields['eps']          ?? null;
           const gross_profit = fields['gross_profit'] ?? null;
 
-          const gross_margin = (revenue && gross_profit && revenue !== 0)
+          // FIX: require revenue > 0, not just !== 0. Negative revenue
+          // (common for investment-holding companies like 6901, where
+          // "revenue" reflects investment gains/losses) was producing
+          // meaningless margins — e.g. gross_profit == revenue for these
+          // entities meant gross_margin computed to exactly 100% every
+          // single quarter regardless of real performance, and net_margin
+          // swung to nonsensical values like 147.8% or -88.9% because
+          // dividing by a negative number flips and exaggerates the sign.
+          const gross_margin = (gross_profit != null && revenue != null && revenue > 0)
             ? Math.round((gross_profit / revenue) * 10000) / 100 : null;
-          const net_margin = (revenue && net_income && revenue !== 0)
+          const net_margin = (net_income != null && revenue != null && revenue > 0)
             ? Math.round((net_income / revenue) * 10000) / 100 : null;
           const debt_ratio = (bs.totalAssets && bs.liabilities && bs.totalAssets > 0)
             ? Math.round((bs.liabilities / bs.totalAssets) * 10000) / 100 : null;
@@ -140,8 +148,8 @@ export async function POST(req: NextRequest) {
                SET eps          = COALESCE(EXCLUDED.eps,          fundamentals.eps),
                    revenue      = COALESCE(EXCLUDED.revenue,      fundamentals.revenue),
                    net_income   = COALESCE(EXCLUDED.net_income,   fundamentals.net_income),
-                   gross_margin = COALESCE(EXCLUDED.gross_margin, fundamentals.gross_margin),
-                   net_margin   = COALESCE(EXCLUDED.net_margin,   fundamentals.net_margin),
+                   gross_margin = EXCLUDED.gross_margin,
+                   net_margin   = EXCLUDED.net_margin,
                    debt_ratio   = COALESCE(EXCLUDED.debt_ratio,   fundamentals.debt_ratio),
                    roe          = COALESCE(EXCLUDED.roe,          fundamentals.roe),
                    market_cap   = COALESCE(EXCLUDED.market_cap,   fundamentals.market_cap)`,
