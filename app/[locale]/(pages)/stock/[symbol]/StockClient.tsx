@@ -119,19 +119,23 @@ export default function StockClient({ initialData }: { initialData?: any }) {
   const change = formatChange(displayQuote?.change_pct ?? 0);
 
   // Merge all periods — newest first, first non-null value for each field wins
-  const fund = fundamentals.reduce((acc, f) => ({
-    ...acc,
-    ...(f.roe          != null && { roe:          f.roe }),
-    ...(f.market_cap   != null && { market_cap:   f.market_cap }),
-    ...(f.eps          != null && { eps:          f.eps }),
-    ...(f.gross_margin != null && { gross_margin: f.gross_margin }),
-    ...(f.net_margin   != null && { net_margin:   f.net_margin }),
-    ...(f.debt_ratio   != null && { debt_ratio:   f.debt_ratio }),
-    ...(f.pe_ratio     != null && { pe_ratio:     f.pe_ratio }),
-    ...(f.pb_ratio     != null && { pb_ratio:     f.pb_ratio }),
-    ...(f.revenue      != null && { revenue:      f.revenue }),
-    ...(f.net_income   != null && { net_income:   f.net_income }),
-  }), {} as Record<string, number>);
+ // Merge all periods — newest first, first non-null value for each field wins.
+  // (Rewritten to actually keep the newest non-null value per field — the old
+  // spread-based version let an OLDER period silently overwrite a NEWER one.)
+  const fund = fundamentals.reduce((acc, f) => {
+    const next: Record<string, number> = { ...acc };
+    if (next.roe          == null && f.roe          != null) next.roe          = f.roe;
+    if (next.market_cap   == null && f.market_cap   != null) next.market_cap   = f.market_cap;
+    if (next.eps          == null && f.eps          != null) next.eps          = f.eps;
+    if (next.gross_margin == null && f.gross_margin != null) next.gross_margin = f.gross_margin;
+    if (next.net_margin   == null && f.net_margin   != null) next.net_margin   = f.net_margin;
+    if (next.debt_ratio   == null && f.debt_ratio   != null) next.debt_ratio   = f.debt_ratio;
+    if (next.pe_ratio     == null && f.pe_ratio     != null) next.pe_ratio     = f.pe_ratio;
+    if (next.pb_ratio     == null && f.pb_ratio     != null) next.pb_ratio     = f.pb_ratio;
+    if (next.revenue      == null && f.revenue      != null) next.revenue      = f.revenue;
+    if (next.net_income   == null && f.net_income   != null) next.net_income   = f.net_income;
+    return next;
+  }, {} as Record<string, number>);
 
   // Compute ROE from available data: eps × pb_ratio / close × 100
   // (ROE = eps/book_value × 100, book_value = price/pb_ratio)

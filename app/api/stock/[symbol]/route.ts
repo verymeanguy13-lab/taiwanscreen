@@ -54,18 +54,28 @@ export async function GET(
             [symbol],
           ),
 
-          // 3. Fundamentals — last 8 periods that actually have data
+          // 3. Fundamentals — last 8 periods that actually have data.
+          // Checks every meaningful column, not just a hand-picked subset —
+          // otherwise a period-row whose only populated field isn't in this
+          // list gets silently excluded (this previously happened to pb_ratio,
+          // net_margin, roa, and the two growth_yoy columns).
           queryUnsafe(
             `SELECT * FROM fundamentals
              WHERE symbol = $1
                AND (
                  eps IS NOT NULL OR
                  revenue IS NOT NULL OR
+                 net_income IS NOT NULL OR
                  gross_margin IS NOT NULL OR
+                 net_margin IS NOT NULL OR
                  pe_ratio IS NOT NULL OR
+                 pb_ratio IS NOT NULL OR
                  roe IS NOT NULL OR
+                 roa IS NOT NULL OR
                  debt_ratio IS NOT NULL OR
-                 market_cap IS NOT NULL
+                 market_cap IS NOT NULL OR
+                 revenue_growth_yoy IS NOT NULL OR
+                 eps_growth_yoy IS NOT NULL
                )
              ORDER BY period DESC
              LIMIT 8`,
