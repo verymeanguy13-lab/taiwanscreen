@@ -68,5 +68,28 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  return NextResponse.json({ roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901 });
+  // Why do semiconductor / monthly_income / quarterly_dividend / stable_dividend
+  // presets return 0 samples? Check the actual stored values behind each.
+  const sectorCheck = await queryUnsafe(
+    `SELECT sector, COUNT(*)::int AS n FROM stocks GROUP BY sector ORDER BY n DESC LIMIT 20`,
+    [],
+  );
+  const dividendFreqCheck = await queryUnsafe(
+    `SELECT dividend_frequency, COUNT(*)::int AS n FROM dividend_summary GROUP BY dividend_frequency ORDER BY n DESC`,
+    [],
+  );
+  const stabilityScoreCheck = await queryUnsafe(
+    `SELECT
+       COUNT(*)::int                                  AS total_rows,
+       COUNT(stability_score)::int                    AS non_null_rows,
+       MAX(stability_score)::int                      AS max_score,
+       COUNT(*) FILTER (WHERE stability_score >= 80)::int AS rows_ge_80
+     FROM dividend_summary`,
+    [],
+  );
+
+  return NextResponse.json({
+    roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
+    sectorCheck, dividendFreqCheck, stabilityScoreCheck,
+  });
 }
