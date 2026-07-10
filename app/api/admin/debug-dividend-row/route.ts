@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   // 6901's position in the alphabetically-sorted stock list, to know which
   // offset/batch will actually reach it
   const positionCheck = await queryUnsafe(
-    `SELECT COUNT(*)::int AS offset_for_6901 FROM stocks WHERE symbol < '6901'`,
+    `SELECT COUNT(*)::int AS offset_for_6901 FROM stocks WHERE symbol < '2637'`,
     [],
   );
 
