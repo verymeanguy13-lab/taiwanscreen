@@ -60,5 +60,13 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  return NextResponse.json({ roeCheck, growthCheck, positionCheck, scopeCheck });
+  // Every raw row that exists for 6901, exactly as stored — to check whether
+  // a separate current-quarter row (holding only pe_ratio/pb_ratio) exists
+  // alongside the reported-quarter rows (holding eps/revenue/margins).
+  const rawRows6901 = await queryUnsafe(
+    `SELECT * FROM fundamentals WHERE symbol = '6901' ORDER BY period DESC`,
+    [],
+  );
+
+  return NextResponse.json({ roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901 });
 }
