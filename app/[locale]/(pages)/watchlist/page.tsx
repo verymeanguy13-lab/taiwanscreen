@@ -113,7 +113,7 @@ function WatchlistTable({
                   {fmtVol(row.volume)}
                 </td>
                 <td className="num px-3 py-2"
-                  style={{ color: (row.foreign_net ?? 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                  style={{ color: (row.foreign_net ?? 0) >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
                   {fmtNet(row.foreign_net)}
                 </td>
                 <td className="px-3 py-2">
