@@ -17,10 +17,8 @@ export async function GET(
 
   try {
     const result = await cached(cacheKey, 60 * 60, async () => {
-      // ── Fetch last 4 periods of available fundamentals ───────────────────
-      // pe_ratio, pb_ratio, roe, debt_ratio are all NULL in DB (not yet seeded).
-      // Use gross_margin, net_margin, eps, revenue which ARE populated.
-      // Skip rows where gross_margin is NULL (e.g. current quarter not yet reported).
+      // ── Fetch last 4 periods where gross_margin is populated ─────────────
+      // Used for profitability/growth calcs that need matched quarter-pairs.
       const fundRows = await queryUnsafe<{
         gross_margin: number | null;
         net_margin:   number | null;
@@ -36,7 +34,6 @@ export async function GET(
         [symbol],
       );
 
-      // ── Compute YoY growth from period[0] vs period[1] ──────────────────
       const latestFund = fundRows[0] ?? {};
       const prevFund   = fundRows[1] ?? {};
 
@@ -53,6 +50,39 @@ export async function GET(
               Number(prevFund.eps)) *
             100
           : null;
+
+      // ── Latest non-null pe_ratio / pb_ratio / roe / debt_ratio ──────────
+      // These previously were hardcoded to null here with a comment saying
+      // they weren't in the DB yet — that's now stale. They live in whichever
+      // recent period-row happens to carry them (a TWSE-sourced row only has
+      // pe_ratio/pb_ratio; a FinMind-sourced reported quarter only has
+      // roe/debt_ratio), so a single "latest row" isn't enough — scan the
+      // last 8 periods and take the newest non-null value found per field.
+      const recentRows = await queryUnsafe<{
+        period:     string;
+        pe_ratio:   number | null;
+        pb_ratio:   number | null;
+        roe:        number | null;
+        debt_ratio: number | null;
+      }>(
+        `SELECT period, pe_ratio, pb_ratio, roe, debt_ratio
+         FROM fundamentals
+         WHERE symbol = $1
+         ORDER BY period DESC
+         LIMIT 8`,
+        [symbol],
+      );
+
+      let peRatio:   number | null = null;
+      let pbRatio:   number | null = null;
+      let roe:       number | null = null;
+      let debtRatio: number | null = null;
+      for (const row of recentRows) {
+        if (peRatio   === null && row.pe_ratio   != null) peRatio   = Number(row.pe_ratio);
+        if (pbRatio   === null && row.pb_ratio   != null) pbRatio   = Number(row.pb_ratio);
+        if (roe       === null && row.roe        != null) roe       = Number(row.roe);
+        if (debtRatio === null && row.debt_ratio != null) debtRatio = Number(row.debt_ratio);
+      }
 
       // ── Fetch latest institutional flows ─────────────────────────────────
       const flowRows = await queryUnsafe<{
@@ -83,19 +113,16 @@ export async function GET(
       const div  = divRows[0]  ?? {};
 
       return computeHealthScore({
-        // Not yet in DB — pass null; scoring falls back to available data
-        pe_ratio:   null,
-        pb_ratio:   null,
-        roe:        null,
-        debt_ratio: null,
+        pe_ratio:   peRatio,
+        pb_ratio:   pbRatio,
+        roe:        roe,
+        debt_ratio: debtRatio,
 
-        // Available from fundamentals table
         gross_margin:       latestFund.gross_margin ? Number(latestFund.gross_margin) : null,
         net_margin:         latestFund.net_margin   ? Number(latestFund.net_margin)   : null,
         revenue_growth_yoy: revenueGrowth,
         eps_growth_yoy:     epsGrowth,
 
-        // Institutional & dividend
         foreign_consecutive_days: flow.foreign_consecutive_days ? Number(flow.foreign_consecutive_days) : null,
         triple_buy:               flow.triple_buy ?? false,
         latest_yield_pct:         div.latest_yield_pct  ? Number(div.latest_yield_pct)  : null,
