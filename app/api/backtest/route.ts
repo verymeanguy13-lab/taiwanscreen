@@ -8,6 +8,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
 import type { ScreenerFilter } from '@/types';
 
+// Computed market cap expression (in 億 NTD) — same formula as the screener.
+const MARKET_CAP_EXPR = `COALESCE(f.market_cap, (s.shares_outstanding * dp.close / 100000000.0))`;
+
 // ── Preset strategies ─────────────────────────────────────────────────────────
 export const PRESETS = [
   {
@@ -58,6 +61,67 @@ export const PRESETS = [
     description: 'EPS 成長 ≥ 20%，營收成長 ≥ 15%',
     filters:     { eps_growth_min: 20, revenue_growth_min: 15 } as ScreenerFilter,
   },
+  // ── New presets — added to match the screener's quick-filter list ──────────
+  {
+    id:          'monthly_income',
+    name_zh:     '月月領息',
+    description: '月配息且殖利率 ≥ 3%',
+    filters:     { dividend_freq: 'monthly', yield_min: 3 } as ScreenerFilter,
+  },
+  {
+    id:          'foreign_trust_double',
+    name_zh:     '外資投信雙買',
+    description: '外資投信同步買超',
+    filters:     { foreign_net_min: 100, trust_net_min: 50 } as ScreenerFilter,
+  },
+  {
+    id:          'semiconductor',
+    name_zh:     '半導體族群',
+    description: '半導體產業所有股票',
+    filters:     { sector: ['半導體'] } as ScreenerFilter,
+  },
+  {
+    id:          'high_gross_margin',
+    name_zh:     '高毛利率',
+    description: '毛利率 ≥ 40%，ROE ≥ 15%',
+    filters:     { gross_margin_min: 40, roe_min: 15 } as ScreenerFilter,
+  },
+  {
+    id:          'stable_dividend',
+    name_zh:     '配息穩定',
+    description: '配息穩定分數 ≥ 80，殖利率 ≥ 3%',
+    filters:     { stability_score_min: 80, yield_min: 3 } as ScreenerFilter,
+  },
+  {
+    id:          'small_cap_growth',
+    name_zh:     '小型成長股',
+    description: '市值 ≤ 50億，營收成長 ≥ 15%，ROE ≥ 12%',
+    filters:     { market_cap_max: 50, revenue_growth_min: 15, roe_min: 12 } as ScreenerFilter,
+  },
+  {
+    id:          'large_cap_quality',
+    name_zh:     '大型優質股',
+    description: '市值 ≥ 1000億，ROE ≥ 15%，負債比 ≤ 35%',
+    filters:     { market_cap_min: 1000, roe_min: 15, debt_ratio_max: 35 } as ScreenerFilter,
+  },
+  {
+    id:          'quarterly_dividend',
+    name_zh:     '季配息',
+    description: '季配息且殖利率 ≥ 4%',
+    filters:     { dividend_freq: 'quarterly', yield_min: 4 } as ScreenerFilter,
+  },
+  {
+    id:          'low_debt_high_yield',
+    name_zh:     '低負債高息',
+    description: '負債比 ≤ 30%，殖利率 ≥ 4%',
+    filters:     { debt_ratio_max: 30, yield_min: 4 } as ScreenerFilter,
+  },
+  {
+    id:          'big_foreign_buy',
+    name_zh:     '外資大買超',
+    description: '外資單日大量買超',
+    filters:     { foreign_net_min: 1000, volume_min: 500 } as ScreenerFilter,
+  },
 ];
 
 // ── Period → days ─────────────────────────────────────────────────────────────
@@ -100,12 +164,19 @@ function buildWhere(
   if (filters.price_min)           add('dp.close >= ?',              filters.price_min);
   if (filters.price_max)           add('dp.close <= ?',              filters.price_max);
   if (filters.change_pct_min)      add('dp.change_pct >= ?',         filters.change_pct_min);
+  if (filters.volume_min)          add('dp.volume >= ?',             filters.volume_min);
   if (filters.foreign_net_min)     add('i.foreign_net >= ?',         filters.foreign_net_min);
+  if (filters.trust_net_min)       add('i.trust_net >= ?',           filters.trust_net_min);
   if (filters.foreign_consecutive_min) add('i.foreign_consecutive_days >= ?', filters.foreign_consecutive_min);
   if (filters.triple_buy === true) add('i.triple_buy = ?',           true);
   if (filters.yield_min)           add('ds.latest_yield_pct >= ?',   filters.yield_min);
   if (filters.yield_max)           add('ds.latest_yield_pct <= ?',   filters.yield_max);
   if (filters.consecutive_years_min) add('ds.consecutive_years >= ?', filters.consecutive_years_min);
+  if (filters.stability_score_min) add('ds.stability_score >= ?',    filters.stability_score_min);
+  if (filters.dividend_freq)       add('ds.dividend_frequency = ?',  filters.dividend_freq);
+  if (filters.market_cap_min)      add(`${MARKET_CAP_EXPR} >= ?`,    filters.market_cap_min);
+  if (filters.market_cap_max)      add(`${MARKET_CAP_EXPR} <= ?`,    filters.market_cap_max);
+  if (filters.sector && filters.sector.length > 0) add('s.sector = ANY(?::text[])', filters.sector);
   if (filters.market && filters.market !== 'all') add('s.market = ?', filters.market);
 
   return { conditions, params, nextIdx: idx };
@@ -148,7 +219,8 @@ export async function POST(req: NextRequest) {
            (SELECT gross_margin       FROM fundamentals WHERE symbol = s.symbol AND gross_margin       IS NOT NULL ORDER BY period DESC LIMIT 1) AS gross_margin,
            (SELECT debt_ratio         FROM fundamentals WHERE symbol = s.symbol AND debt_ratio         IS NOT NULL ORDER BY period DESC LIMIT 1) AS debt_ratio,
            (SELECT eps_growth_yoy     FROM fundamentals WHERE symbol = s.symbol AND eps_growth_yoy     IS NOT NULL ORDER BY period DESC LIMIT 1) AS eps_growth_yoy,
-           (SELECT revenue_growth_yoy FROM fundamentals WHERE symbol = s.symbol AND revenue_growth_yoy IS NOT NULL ORDER BY period DESC LIMIT 1) AS revenue_growth_yoy
+           (SELECT revenue_growth_yoy FROM fundamentals WHERE symbol = s.symbol AND revenue_growth_yoy IS NOT NULL ORDER BY period DESC LIMIT 1) AS revenue_growth_yoy,
+           (SELECT market_cap         FROM fundamentals WHERE symbol = s.symbol AND market_cap         IS NOT NULL ORDER BY period DESC LIMIT 1) AS market_cap
        ) f ON true
        LEFT JOIN institutional_flows i ON s.symbol = i.symbol
        LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
