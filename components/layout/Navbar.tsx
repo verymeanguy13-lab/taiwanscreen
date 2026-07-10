@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Zap, Menu, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useSession, signIn, signOut } from 'next-auth/react';
 
 const NAV_LINKS = [
   { key: 'dazhang',      href: '/dazhang'      },
@@ -27,6 +28,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const router   = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { data: session, status } = useSession();
 
   const currentLocale = pathname.startsWith('/en') ? 'en' : 'zh';
 
@@ -95,23 +97,45 @@ export default function Navbar() {
             {currentLocale === 'zh' ? 'EN' : '中'}
           </button>
 
-          <Link
-            href={`/${currentLocale}/login`}
-            className="hidden md:inline-flex h-8 items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
-            style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
-            onMouseEnter={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.backgroundColor = 'var(--accent-blue)';
-              el.style.color = 'var(--bg-primary)';
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.backgroundColor = 'transparent';
-              el.style.color = 'var(--accent-blue)';
-            }}
-          >
-            {t('login')}
-          </Link>
+          {/* ── Auth (desktop) ── */}
+          {status === 'authenticated' ? (
+            <div className="hidden md:flex items-center gap-2">
+              <span
+                className="max-w-[140px] truncate text-xs"
+                style={{ color: 'var(--text-muted)' }}
+                title={session?.user?.email ?? ''}
+              >
+                {session?.user?.email}
+              </span>
+              <button
+                onClick={() => signOut()}
+                className="h-8 inline-flex items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--accent-red)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
+              >
+                登出
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => signIn('google')}
+              className="hidden md:inline-flex h-8 items-center justify-center rounded px-3 text-sm font-medium transition-colors duration-150"
+              style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.backgroundColor = 'var(--accent-blue)';
+                el.style.color = 'var(--bg-primary)';
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.backgroundColor = 'transparent';
+                el.style.color = 'var(--accent-blue)';
+              }}
+            >
+              {t('login')}
+            </button>
+          )}
 
           <button
             className="flex md:hidden items-center justify-center rounded p-1.5"
@@ -154,14 +178,24 @@ export default function Navbar() {
             >
               {currentLocale === 'zh' ? 'EN' : '中'}
             </button>
-            <Link
-              href={`/${currentLocale}/login`}
-              onClick={() => setMobileOpen(false)}
-              className="h-8 rounded px-3 text-sm font-medium"
-              style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
-            >
-              {t('login')}
-            </Link>
+
+            {status === 'authenticated' ? (
+              <button
+                onClick={() => { signOut(); setMobileOpen(false); }}
+                className="h-8 rounded px-3 text-sm font-medium"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >
+                登出（{session?.user?.email}）
+              </button>
+            ) : (
+              <button
+                onClick={() => { signIn('google'); setMobileOpen(false); }}
+                className="h-8 rounded px-3 text-sm font-medium"
+                style={{ color: 'var(--accent-blue)', border: '1px solid var(--accent-blue)' }}
+              >
+                {t('login')}
+              </button>
+            )}
           </div>
         </div>
       )}

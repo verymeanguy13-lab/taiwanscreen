@@ -1,5 +1,6 @@
 import NextAuth, { type NextAuthOptions, type DefaultSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
+import { query } from '@/lib/db';
 
 declare module 'next-auth' {
   interface Session {
@@ -7,6 +8,10 @@ declare module 'next-auth' {
       email: string;
     } & DefaultSession['user'];
   }
+}
+
+interface UserRow {
+  id: number;
 }
 
 export const authOptions: NextAuthOptions = {
@@ -21,6 +26,24 @@ export const authOptions: NextAuthOptions = {
     maxAge:   30 * 24 * 60 * 60,
   },
   callbacks: {
+    // Runs every time someone signs in. Creates the matching row in our own
+    // `users` table the first time (ON CONFLICT DO NOTHING keeps it a no-op
+    // on every later sign-in). Without this, someone can authenticate with
+    // Google successfully but every feature that looks them up in our own
+    // database (watchlist, etc.) fails with "User not found".
+    async signIn({ user }) {
+      if (!user?.email) return false;
+      try {
+        await query<UserRow>`
+          INSERT INTO users (email, name)
+          VALUES (${user.email}, ${user.name ?? null})
+          ON CONFLICT (email) DO NOTHING
+        `;
+      } catch (err) {
+        console.error('[auth] Failed to upsert user row:', err);
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       if (user?.email) token.email = user.email;
       return token;
@@ -30,9 +53,10 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
-  pages: {
-    signIn: '/login',
-  },
+  // No custom sign-in page — '/login' was configured here previously, but
+  // that page was never actually built anywhere in the app, which is why
+  // NextAuth's own redirects to it occasionally 404'd. Removing this lets
+  // NextAuth fall back to its own built-in handling instead.
 };
 
 export default NextAuth(authOptions);
