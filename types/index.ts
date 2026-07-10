@@ -44,6 +44,7 @@ export interface Fundamentals {
   net_income?: number;
   gross_margin?: number;
   net_margin?: number;
+  operating_margin?: number;
   revenue_growth_yoy?: number;
   eps_growth_yoy?: number;
   debt_ratio?: number;
@@ -203,6 +204,7 @@ export interface ScreenerRow {
   roa?: number;
   gross_margin?: number;
   net_margin?: number;
+  operating_margin?: number;
   revenue_growth_yoy?: number;
   eps_growth_yoy?: number;
   debt_ratio?: number;

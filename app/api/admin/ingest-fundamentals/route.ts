@@ -120,15 +120,18 @@ export async function POST(req: NextRequest) {
           const fields = periodMap[period] ?? {};
           const bs     = bsMap[period]     ?? {};
 
-          const revenue      = fields['revenue']      ?? null;
-          const net_income   = fields['net_income']   ?? null;
-          const eps          = fields['eps']          ?? null;
-          const gross_profit = fields['gross_profit'] ?? null;
+          const revenue          = fields['revenue']          ?? null;
+          const net_income       = fields['net_income']       ?? null;
+          const eps              = fields['eps']              ?? null;
+          const gross_profit     = fields['gross_profit']     ?? null;
+          const operating_income = fields['operating_income'] ?? null;
 
           const gross_margin = (gross_profit != null && revenue != null && revenue > 0)
             ? Math.round((gross_profit / revenue) * 10000) / 100 : null;
           const net_margin = (net_income != null && revenue != null && revenue > 0)
             ? Math.round((net_income / revenue) * 10000) / 100 : null;
+          const operating_margin = (operating_income != null && revenue != null && revenue > 0)
+            ? Math.round((operating_income / revenue) * 10000) / 100 : null;
           const debt_ratio = (bs.totalAssets && bs.liabilities && bs.totalAssets > 0)
             ? Math.round((bs.liabilities / bs.totalAssets) * 10000) / 100 : null;
           const roe = (net_income && bs.equity && bs.equity > 0)
@@ -136,18 +139,19 @@ export async function POST(req: NextRequest) {
 
           await queryUnsafe(
             `INSERT INTO fundamentals
-               (symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio, roe, market_cap)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               (symbol, period, eps, revenue, net_income, gross_margin, net_margin, operating_margin, debt_ratio, roe, market_cap)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
              ON CONFLICT (symbol, period) DO UPDATE
-               SET eps          = COALESCE(EXCLUDED.eps,          fundamentals.eps),
-                   revenue      = COALESCE(EXCLUDED.revenue,      fundamentals.revenue),
-                   net_income   = COALESCE(EXCLUDED.net_income,   fundamentals.net_income),
-                   gross_margin = EXCLUDED.gross_margin,
-                   net_margin   = EXCLUDED.net_margin,
-                   debt_ratio   = COALESCE(EXCLUDED.debt_ratio,   fundamentals.debt_ratio),
-                   roe          = COALESCE(EXCLUDED.roe,          fundamentals.roe),
-                   market_cap   = COALESCE(EXCLUDED.market_cap,   fundamentals.market_cap)`,
-            [symbol, period, eps, revenue, net_income, gross_margin, net_margin, debt_ratio, roe, market_cap],
+               SET eps              = COALESCE(EXCLUDED.eps,              fundamentals.eps),
+                   revenue          = COALESCE(EXCLUDED.revenue,          fundamentals.revenue),
+                   net_income       = COALESCE(EXCLUDED.net_income,       fundamentals.net_income),
+                   gross_margin     = EXCLUDED.gross_margin,
+                   net_margin       = EXCLUDED.net_margin,
+                   operating_margin = EXCLUDED.operating_margin,
+                   debt_ratio       = COALESCE(EXCLUDED.debt_ratio,       fundamentals.debt_ratio),
+                   roe              = COALESCE(EXCLUDED.roe,              fundamentals.roe),
+                   market_cap       = COALESCE(EXCLUDED.market_cap,       fundamentals.market_cap)`,
+            [symbol, period, eps, revenue, net_income, gross_margin, net_margin, operating_margin, debt_ratio, roe, market_cap],
           );
           count++;
         }
