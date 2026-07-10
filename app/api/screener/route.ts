@@ -72,6 +72,12 @@ export async function GET(req: NextRequest) {
     params.push(market);
   }
 
+  const search = p.get('search');
+  if (search && search.trim()) {
+    conditions.push(`(s.symbol ILIKE $${idx} OR s.name_zh ILIKE $${idx} OR s.name_en ILIKE $${idx})`);
+    params.push(`%${search.trim()}%`);
+    idx++;
+  }
   const WHERE = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const SORT_COL: Record<string, string> = {
