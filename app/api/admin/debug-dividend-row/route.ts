@@ -88,8 +88,23 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+ // Does the backtest's mandatory institutional_flows join silently exclude
+  // stocks that have no institutional data at all — even for presets whose
+  // filters don't need institutional data (like a pure sector filter)?
+  const semiconductorJoinCheck = await queryUnsafe(
+    `SELECT
+       COUNT(*)::int AS total_semiconductor_stocks,
+       COUNT(*) FILTER (WHERE i.symbol IS NOT NULL)::int AS have_any_institutional_row
+     FROM stocks s
+     LEFT JOIN institutional_flows i ON s.symbol = i.symbol
+     WHERE s.sector = '半導體業'`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
+    semiconductorJoinCheck,
   });
+
 }
