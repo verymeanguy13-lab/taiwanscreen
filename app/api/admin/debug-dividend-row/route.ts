@@ -125,10 +125,26 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+ // Session 79: is the 2026-06-05 staleness specific to the semiconductor
+  // sector, or is the ENTIRE daily_prices table frozen at that date (i.e.
+  // fetchAllStockPrices/ingestDailyPrices has been silently failing site-wide
+  // every day since then)? This is the single most important thing to know
+  // before chasing this further.
+  const globalPricesFreshnessCheck = await queryUnsafe(
+    `SELECT
+       MAX(date)::text                              AS global_latest_date,
+       COUNT(*) FILTER (WHERE date = (SELECT MAX(date) FROM daily_prices))::int AS rows_on_latest_date,
+       COUNT(DISTINCT date)::int                     AS total_distinct_dates,
+       (SELECT COUNT(*)::int FROM daily_prices WHERE date >= CURRENT_DATE - INTERVAL '10 days') AS rows_in_last_10_days
+     FROM daily_prices`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
-    semiconductorJoinCheck, dailyPricesCoverageCheck,
+    semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
   });
+
 
 }
