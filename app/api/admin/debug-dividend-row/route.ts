@@ -140,11 +140,45 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+ // Site-wide ingestion is fine (confirmed by globalPricesFreshnessCheck),
+  // so the semiconductor staleness is sector-specific. Break it down by
+  // market (TWSE vs TPEx) to check whether this is the previously-known
+  // "TPEx bulk prices blocked from Vercel datacenter IPs" issue, or
+  // whether even TWSE-listed semiconductor names (e.g. 2330) are affected.
+  const semiconductorByMarketCheck = await queryUnsafe(
+    `SELECT
+       s.market,
+       COUNT(*)::int             AS stock_count,
+       MIN(dp.latest_date)::text AS earliest_latest_date,
+       MAX(dp.latest_date)::text AS latest_latest_date
+     FROM stocks s
+     LEFT JOIN LATERAL (
+       SELECT MAX(date) AS latest_date
+       FROM daily_prices
+       WHERE symbol = s.symbol
+     ) dp ON true
+     WHERE s.sector = '半導體業'
+     GROUP BY s.market
+     ORDER BY s.market`,
+    [],
+  );
+
+  // Specifically check 2330 (TSMC, TWSE-listed large cap) since it's the
+  // clearest single data point: if even 2330 is stuck at June 5, the
+  // problem isn't TPEx-specific.
+  const tsmcPriceCheck = await queryUnsafe(
+    `SELECT symbol, MAX(date)::text AS latest_date, COUNT(*)::int AS total_rows
+     FROM daily_prices WHERE symbol = '2330' GROUP BY symbol`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
     semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
+    semiconductorByMarketCheck, tsmcPriceCheck,
   });
+
 
 
 }
