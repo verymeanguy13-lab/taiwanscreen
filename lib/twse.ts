@@ -168,7 +168,7 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
         if (!close || close <= 0) continue;
 
         const direction = String(row[9] ?? '').trim();
-const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
+        const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
         const change_amt = sign * clean(row[10]);
         const prevClose  = close - change_amt;
         const change_pct = prevClose > 0
@@ -203,14 +203,24 @@ const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
       }
 
       const json = await res.json();
-      if (!json || !Array.isArray(json.aaData)) {
-        console.error('[fetchAllStockPrices] TPEx: unexpected response shape');
+      // TPEx's response format changed at some point from the legacy
+      // {"aaData": [...]} shape to a TWSE-MI_INDEX-style {"tables": [{fields,
+      // data}]} shape. The old aaData check silently returned [] on every
+      // request once this happened -- explaining why TPEx-listed stocks'
+      // daily_prices froze at whatever date the format changed (observed:
+      // 2026-06-05), while TWSE ingestion (unaffected) kept working fine.
+      const tables = Array.isArray(json?.tables) ? json.tables : null;
+      const priceTable = tables?.find((t: { fields?: string[] }) =>
+        Array.isArray(t.fields) && t.fields.length >= 8 && t.fields[0]?.includes('代號')
+      );
+      if (!priceTable || !Array.isArray(priceTable.data)) {
+        console.error('[fetchAllStockPrices] TPEx: unexpected response shape (no tables[].data found)');
         return [];
       }
 
       const results: RawStockPrice[] = [];
-      for (const row of json.aaData as string[][]) {
-        if (!row || row.length < 7) continue;
+      for (const row of priceTable.data as string[][]) {
+        if (!row || row.length < 8) continue;
         const symbol = String(row[0]).trim();
         if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
@@ -223,7 +233,11 @@ const sign = (direction.includes('-') && !direction.includes('+')) ? -1 : 1;
         const open       = clean(row[4]);
         const high       = clean(row[5]);
         const low        = clean(row[6]);
-        const volume     = Math.round(clean(row[8]) / 1000); // shares → lots
+        // NOTE: in the current tables[] field layout, 成交股數 (volume in
+        // shares) is at index 7, not 8 -- index 8 is 成交金額(元) (trade
+        // value in dollars). The old aaData-based row[8] was correct for
+        // the legacy format but reads the wrong column here.
+        const volume     = Math.round(clean(row[7]) / 1000); // shares → lots
         const prevClose  = close - change_amt;
         const change_pct = prevClose > 0
           ? Math.round((change_amt / prevClose) * 10000) / 100
@@ -358,17 +372,55 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
     type TWSEStockInfo = {
       '公司代號': string;
       '公司簡稱': string;
-      '產業類別': string;
+      '產業別': string; // NOTE: field is '產業別', not '產業類別' -- and even if
+                         // read correctly it's a numeric code (e.g. "24"),
+                         // not a readable name. Sector is now sourced from
+                         // the ISIN scrape below instead; this field is kept
+                         // only for reference/logging.
       '已發行普通股數或TDR原股發行股數': string;
     };
 
     const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
+
+    // Build symbol -> readable sector name for TWSE-listed (上市) stocks via
+    // the same ISIN lookup page already used below for TPEx (上櫃) sectors --
+    // proven to correctly decode and return real Chinese sector names (e.g.
+    // 半導體業). t187ap03_L's own sector field was previously read under the
+    // wrong key name ('產業類別' vs the real '產業別'), which silently
+    // blanked sector for all ~1,090 TWSE-listed stocks; and even fixing the
+    // key name would only yield a numeric code, not a name matching the
+    // Chinese sector strings used throughout the rest of the app.
+    const twseSectorMap = new Map<string, string>();
+    try {
+      const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=2', {
+        headers: { 'Accept': 'text/html' },
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const rowRegex = /<tr>[\s\S]*?<td[^>]*>(\d{4,6}[A-Z0-9]*)\u3000([^<]+)<\/td>[\s\S]*?<td[^>]*>[^<]*<\/td>[\s\S]*?<td[^>]*>上市<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/g;
+        let match;
+        while ((match = rowRegex.exec(html)) !== null) {
+          const symbol = match[1].trim();
+          const sector = match[3].trim();
+          if (/^\d{4}$/.test(symbol) && sector) {
+            twseSectorMap.set(symbol, sector);
+          }
+        }
+        console.log(`[fetchStockList] TWSE sector map (ISIN scrape): ${twseSectorMap.size} entries`);
+      } else {
+        console.error(`[fetchStockList] TWSE ISIN sector scrape HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error('[fetchStockList] TWSE ISIN sector scrape failed:', err);
+    }
+
     const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
       .map(r => ({
         symbol:             r['公司代號'].trim(),
         name_zh:            r['公司簡稱']?.trim() ?? '',
-        sector:             r['產業類別']?.trim() ?? '',
+        sector:             twseSectorMap.get(r['公司代號'].trim()) ?? '',
         market:             'TWSE' as const,
         shares_outstanding: parseInt(r['已發行普通股數或TDR原股發行股數']?.replace(/,/g, '') ?? '0', 10) || null,
       }));

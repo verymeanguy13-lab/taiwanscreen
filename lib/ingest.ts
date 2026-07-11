@@ -29,7 +29,8 @@ export async function ingestStockList(): Promise<IngestResult> {
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (symbol) DO UPDATE
            SET name_zh            = EXCLUDED.name_zh,
-               sector             = EXCLUDED.sector,
+               sector             = COALESCE(NULLIF(EXCLUDED.sector, ''), stocks.sec
+tor),
                market             = EXCLUDED.market,
                shares_outstanding = COALESCE(EXCLUDED.shares_outstanding, stocks.shares_outstanding)`,
         [stock.symbol, stock.name_zh, stock.sector ?? null, stock.market, stock.shares_outstanding ?? null],
