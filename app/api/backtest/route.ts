@@ -61,7 +61,6 @@ export const PRESETS = [
     description: 'EPS 成長 ≥ 20%，營收成長 ≥ 15%',
     filters:     { eps_growth_min: 20, revenue_growth_min: 15 } as ScreenerFilter,
   },
-  // ── New presets — added to match the screener's quick-filter list ──────────
   {
     id:          'monthly_income',
     name_zh:     '月月領息',
@@ -133,6 +132,17 @@ const PERIOD_DAYS: Record<string, number> = {
 };
 
 // ── Build WHERE clause from filters ──────────────────────────────────────────
+// NOTE: previously this also forced `i.date = (SELECT MAX(date) FROM
+// institutional_flows WHERE date <= startDate)` as a mandatory condition —
+// but since institutional_flows is joined with a plain LEFT JOIN, a stock
+// with ZERO institutional_flows rows ever (confirmed: all 111 semiconductor
+// stocks) gets i.date = NULL, and `NULL = anything` is never true — so that
+// condition silently excluded such stocks from every preset, even ones that
+// never asked about institutional data at all (like a pure sector filter).
+// Institutional data is now pulled via a LATERAL subquery in the main query
+// instead (see below), which returns NULL fields instead of dropping the row
+// when no institutional data exists — so only filters that actually check
+// foreign_net/trust_net/etc. are affected by missing institutional data.
 function buildWhere(
   filters: ScreenerFilter,
   startDate: string,
@@ -146,10 +156,8 @@ function buildWhere(
     params.push(val);
   };
 
-  // Use startDate for all date joins
+  // Use startDate for the price join only — institutional data is optional.
   conditions.push(`dp.date = (SELECT MAX(date) FROM daily_prices WHERE date <= $${idx++})`);
-  params.push(startDate);
-  conditions.push(`i.date  = (SELECT MAX(date) FROM institutional_flows WHERE date <= $${idx++})`);
   params.push(startDate);
 
   if (filters.pe_min)              add('f.pe_ratio >= ?',            filters.pe_min);
@@ -201,12 +209,10 @@ export async function POST(req: NextRequest) {
     const { conditions, params } = buildWhere(filters, startDate);
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
-    // NOTE: previously had a bare `LIMIT 200` here with no ORDER BY, which
-    // silently discarded real matches in arbitrary/undefined order once
-    // more than 200 stocks qualified (confirmed: 高ROE had 1,739 true
-    // matches, 高成長 had 242 — both were being cut down to 200 arbitrarily).
-    // Removed — the downstream query already processes the whole symbol
-    // list in one bulk call, so there's no performance reason to cap here.
+    // startDate is always a safe, server-generated 'YYYY-MM-DD' string (built
+    // from PERIOD_DAYS, never user input directly), so it's safe to inline
+    // into the LATERAL subquery below rather than thread it through as yet
+    // another positional parameter alongside buildWhere()'s dynamic list.
     const matchingRows = await queryUnsafe<{ symbol: string; name_zh: string }>(
       `SELECT s.symbol, s.name_zh
        FROM stocks s
@@ -222,7 +228,14 @@ export async function POST(req: NextRequest) {
            (SELECT revenue_growth_yoy FROM fundamentals WHERE symbol = s.symbol AND revenue_growth_yoy IS NOT NULL ORDER BY period DESC LIMIT 1) AS revenue_growth_yoy,
            (SELECT market_cap         FROM fundamentals WHERE symbol = s.symbol AND market_cap         IS NOT NULL ORDER BY period DESC LIMIT 1) AS market_cap
        ) f ON true
-       LEFT JOIN institutional_flows i ON s.symbol = i.symbol
+       LEFT JOIN LATERAL (
+         SELECT foreign_net, trust_net, dealer_net,
+                foreign_consecutive_days, trust_consecutive_days, triple_buy
+         FROM institutional_flows
+         WHERE symbol = s.symbol AND date <= '${startDate}'
+         ORDER BY date DESC
+         LIMIT 1
+       ) i ON true
        LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
        ${whereClause}`,
       params,
@@ -242,9 +255,6 @@ export async function POST(req: NextRequest) {
     const nameMap = new Map(matchingRows.map(r => [r.symbol, r.name_zh]));
 
     // ── Step 2: Compute return for each matching stock ────────────────────
-    // Find closest available start price and today's price.
-    // NOTE: this is a fresh queryUnsafe() call, so its placeholders start
-    // over at $1 — they do NOT continue from the previous query's indices.
     const returnRows = await queryUnsafe<{
       symbol:       string;
       start_close:  string | null;
