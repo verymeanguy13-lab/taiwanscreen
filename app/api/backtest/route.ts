@@ -156,9 +156,7 @@ function buildWhere(
     params.push(val);
   };
 
-  // Use startDate for the price join only — institutional data is optional.
-  conditions.push(`dp.date = (SELECT MAX(date) FROM daily_prices WHERE date <= $${idx++})`);
-  params.push(startDate);
+ 
 
   if (filters.pe_min)              add('f.pe_ratio >= ?',            filters.pe_min);
   if (filters.pe_max)              add('f.pe_ratio <= ?',            filters.pe_max);
@@ -216,7 +214,13 @@ export async function POST(req: NextRequest) {
     const matchingRows = await queryUnsafe<{ symbol: string; name_zh: string }>(
       `SELECT s.symbol, s.name_zh
        FROM stocks s
-       LEFT JOIN daily_prices dp ON s.symbol = dp.symbol
+       LEFT JOIN LATERAL (
+  SELECT close, change_pct, volume, date
+  FROM daily_prices
+  WHERE symbol = s.symbol AND date <= '${startDate}'
+  ORDER BY date DESC
+  LIMIT 1
+) dp ON true
        LEFT JOIN LATERAL (
          SELECT
            (SELECT pe_ratio           FROM fundamentals WHERE symbol = s.symbol AND pe_ratio           IS NOT NULL ORDER BY period DESC LIMIT 1) AS pe_ratio,
