@@ -78,7 +78,7 @@ export const PRESETS = [
     id:          'semiconductor',
     name_zh:     '半導體族群',
     description: '半導體產業所有股票',
-    filters:     { sector: ['半導體'] } as ScreenerFilter,
+    filters:     { sector: ['半導體業'] } as ScreenerFilter,
   },
   {
     id:          'high_gross_margin',
