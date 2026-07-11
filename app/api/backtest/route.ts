@@ -278,9 +278,13 @@ export async function POST(req: NextRequest) {
            ELSE NULL
          END AS return_pct
        FROM daily_prices dp_start
-       JOIN daily_prices dp_end
-         ON dp_start.symbol = dp_end.symbol
-         AND dp_end.date = (SELECT MAX(date) FROM daily_prices)
+       JOIN LATERAL (
+         SELECT close, date
+         FROM daily_prices
+         WHERE symbol = dp_start.symbol
+         ORDER BY date DESC
+         LIMIT 1
+       ) dp_end ON true
        WHERE dp_start.symbol = ANY($1)
          AND dp_start.date = (
            SELECT MAX(date)
