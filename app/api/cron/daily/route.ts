@@ -33,7 +33,6 @@ function toISO(d: Date): string {
   return d.toISOString().split('T')[0];
 }
 
-// Get last N business days (not including today, in Taiwan time)
 function pastBusinessDays(n: number): Date[] {
   const days: Date[] = [];
   const tw = new Date(new Date().getTime() + 8 * 60 * 60 * 1000);
@@ -45,16 +44,10 @@ function pastBusinessDays(n: number): Date[] {
   return days.reverse();
 }
 
-// ---------------------------------------------------------------------------
-// backfillPricesForDate — fetches final EOD prices for a specific past date
-// using the same MI_INDEX endpoint (TWSE) used as the primary source.
-// TPEx backfill uses the same aftertrading endpoint with the specific date.
-// ---------------------------------------------------------------------------
 async function backfillPricesForDate(twseDate: string, isoDate: string): Promise<number> {
   const clean = (s: string) => parseFloat(String(s).replace(/,/g, '').trim()) || 0;
   let count = 0;
 
-  // ── TWSE MI_INDEX ──────────────────────────────────────────────────────────
   try {
     const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${twseDate}&type=ALLBUT0999`;
     const res = await fetch(url, {
@@ -119,7 +112,6 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
     console.error(`[backfill] TWSE MI_INDEX error for ${twseDate}:`, err);
   }
 
-  // ── TPEx aftertrading ──────────────────────────────────────────────────────
   try {
     const tpexDate = `${twseDate.slice(0, 4)}/${twseDate.slice(4, 6)}/${twseDate.slice(6, 8)}`;
     const url = `https://www.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?d=${encodeURIComponent(tpexDate)}&se=AL&s=0,asc&o=json`;
@@ -131,9 +123,13 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
       console.error(`[backfill] TPEx HTTP ${res.status} for ${tpexDate}`);
     } else {
       const json = await res.json();
-      if (json && Array.isArray(json.aaData)) {
-        for (const row of json.aaData as string[][]) {
-          if (!row || row.length < 7) continue;
+      const tables = Array.isArray(json?.tables) ? json.tables : null;
+      const priceTable = tables?.find((t: { fields?: string[] }) =>
+        Array.isArray(t.fields) && t.fields.length >= 8 && t.fields[0]?.includes('代號')
+      );
+      if (priceTable && Array.isArray(priceTable.data)) {
+        for (const row of priceTable.data as string[][]) {
+          if (!row || row.length < 8) continue;
           const symbol = String(row[0]).trim();
           if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
 
@@ -145,7 +141,7 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
           const open       = clean(row[4]);
           const high       = clean(row[5]);
           const low        = clean(row[6]);
-          const volume     = Math.round(clean(row[8]) / 1000);
+          const volume     = Math.round(clean(row[7]) / 1000);
           const prevClose  = close - change_amt;
           const change_pct = prevClose > 0
             ? Math.round((change_amt / prevClose) * 10000) / 100
@@ -181,7 +177,6 @@ async function backfillPricesForDate(twseDate: string, isoDate: string): Promise
 }
 
 export async function GET(req: NextRequest) {
-  // ── Auth: allow Vercel cron trigger OR manual call with secret ─────────────
   const secret = req.headers.get('x-cron-secret');
   const isVercelCron = req.headers.get('x-vercel-cron') === '1';
 
@@ -203,7 +198,6 @@ export async function GET(req: NextRequest) {
   const allErrors: string[] = [];
   const backfillResults: Record<string, number> = {};
 
-  // ── Self-healing: check for missing recent days and backfill ──────────────
   const recentDays = pastBusinessDays(3);
   const [latestPrice] = await sql`SELECT MAX(date) as d FROM daily_prices`;
   const latestPriceDate = latestPrice?.d ? String(latestPrice.d).slice(0, 10) : null;
@@ -221,7 +215,6 @@ export async function GET(req: NextRequest) {
     await new Promise(r => setTimeout(r, 500));
   }
 
-  // ── Main ingestion for today ───────────────────────────────────────────────
   const stocks = await (async () => {
     try { return await ingestStockList(); }
     catch (err) {
@@ -260,7 +253,6 @@ export async function GET(req: NextRequest) {
 
   allErrors.push(...stocks.errors, ...prices.errors, ...institutional.errors, ...margin.errors);
 
-  // ── Background tasks (non-blocking) ───────────────────────────────────────
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? '';
   const cronHeader = { 'x-cron-secret': process.env.CRON_SECRET ?? '' };
 
@@ -272,10 +264,6 @@ export async function GET(req: NextRequest) {
     headers: cronHeader,
   }).catch(err => console.error('[daily] alerts cron error:', err));
 
-  // ── Signal detection: rotate through the whole stock universe over time ───
-  // Each day we advance a persisted "bookmark" (stored in a small cron_state
-  // table) so a different slice of the market gets scanned daily, instead of
-  // always re-scanning the same 5 stocks. 5 sub-batches x 15 stocks = 75/day.
   try {
     await sql`
       CREATE TABLE IF NOT EXISTS cron_state (
@@ -292,8 +280,8 @@ export async function GET(req: NextRequest) {
     `;
     const cursor = Number(cursorRow?.value ?? 0);
 
-    const BATCH_SIZE  = 15;  // stocks per sub-batch (stays under the 10s Vercel timeout)
-    const NUM_BATCHES = 5;   // 5 x 15 = 75 stocks/day
+    const BATCH_SIZE  = 15;
+    const NUM_BATCHES = 5;
     const DAILY_TOTAL = BATCH_SIZE * NUM_BATCHES;
 
     if (totalStocks > 0) {
@@ -317,13 +305,6 @@ export async function GET(req: NextRequest) {
     console.error('[daily] signal-scan cursor error:', err);
   }
 
-  // ── Dividend ingestion: rotate through the whole stock universe over time ─
-  // Same bookmark pattern as signal detection above, using a separate key
-  // in the same cron_state table. Fetches real dividend history from FinMind
-  // per stock, then recalculates dividend_summary (連續配息年 / 穩定分數 /
-  // 配息頻率 / 近期除息日). Previously this only ran when manually triggered,
-  // which is why almost every stock was missing these fields.
-  // 5 sub-batches x 20 stocks = 100/day (~20 days for a full market pass).
   try {
     const [totalRow2] = await sql`SELECT COUNT(*)::int AS n FROM stocks`;
     const totalStocks2 = Number(totalRow2?.n ?? 0);
@@ -333,8 +314,8 @@ export async function GET(req: NextRequest) {
     `;
     const cursor2 = Number(cursorRow2?.value ?? 0);
 
-    const DIV_BATCH_SIZE  = 20;  // matches the hardcoded limit inside ingest-dividends
-    const DIV_NUM_BATCHES = 5;   // 5 x 20 = 100 stocks/day
+    const DIV_BATCH_SIZE  = 20;
+    const DIV_NUM_BATCHES = 5;
     const DIV_DAILY_TOTAL = DIV_BATCH_SIZE * DIV_NUM_BATCHES;
 
     if (totalStocks2 > 0) {
@@ -358,16 +339,6 @@ export async function GET(req: NextRequest) {
     console.error('[daily] dividend-ingest cursor error:', err);
   }
 
-  // ── Fundamentals ingestion: rotate through the whole stock universe ──────
-  // Same bookmark pattern again, separate key. Fetches real EPS/revenue/
-  // gross margin/net margin/growth data from FinMind per stock. Previously
-  // this only ran when manually triggered — same root problem as dividends.
-  // Uses a SMALLER daily batch than dividend ingestion (60 vs 100 stocks)
-  // because each stock here costs 2 FinMind requests (financial statements +
-  // balance sheet) instead of 1, and both jobs share the same hourly FinMind
-  // quota within this same cron run — keeping this conservative avoids the
-  // two jobs colliding on quota. Can raise later if it proves safe.
-  // 3 sub-batches x 20 stocks = 60/day (~34 days for a full market pass).
   try {
     const [totalRow3] = await sql`SELECT COUNT(*)::int AS n FROM stocks`;
     const totalStocks3 = Number(totalRow3?.n ?? 0);
@@ -377,8 +348,8 @@ export async function GET(req: NextRequest) {
     `;
     const cursor3 = Number(cursorRow3?.value ?? 0);
 
-    const FUND_BATCH_SIZE  = 20;  // matches the hardcoded limit inside ingest-fundamentals
-    const FUND_NUM_BATCHES = 3;   // 3 x 20 = 60 stocks/day
+    const FUND_BATCH_SIZE  = 20;
+    const FUND_NUM_BATCHES = 3;
     const FUND_DAILY_TOTAL = FUND_BATCH_SIZE * FUND_NUM_BATCHES;
 
     if (totalStocks3 > 0) {
