@@ -372,55 +372,24 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
     type TWSEStockInfo = {
       '公司代號': string;
       '公司簡稱': string;
-      '產業別': string; // NOTE: field is '產業別', not '產業類別' -- and even if
-                         // read correctly it's a numeric code (e.g. "24"),
-                         // not a readable name. Sector is now sourced from
-                         // the ISIN scrape below instead; this field is kept
-                         // only for reference/logging.
+      '產業別': string; // NOTE: numeric code (e.g. "24"), not a readable name --
+                         // sector for TWSE-listed stocks is populated
+                         // separately via /api/admin/backfill-twse-sector,
+                         // which does a single bulk UPDATE from the ISIN
+                         // page instead of doing it here per-stock (doing it
+                         // here would add a large HTML fetch+parse into the
+                         // hot path shared with the daily cron, risking a
+                         // timeout on Vercel Hobby's 10s limit).
       '已發行普通股數或TDR原股發行股數': string;
     };
 
     const twseRows = await twseFetch<TWSEStockInfo>('/v1/opendata/t187ap03_L');
-
-    // Build symbol -> readable sector name for TWSE-listed (上市) stocks via
-    // the same ISIN lookup page already used below for TPEx (上櫃) sectors --
-    // proven to correctly decode and return real Chinese sector names (e.g.
-    // 半導體業). t187ap03_L's own sector field was previously read under the
-    // wrong key name ('產業類別' vs the real '產業別'), which silently
-    // blanked sector for all ~1,090 TWSE-listed stocks; and even fixing the
-    // key name would only yield a numeric code, not a name matching the
-    // Chinese sector strings used throughout the rest of the app.
-    const twseSectorMap = new Map<string, string>();
-    try {
-      const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=2', {
-        headers: { 'Accept': 'text/html' },
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const html = await res.text();
-        const rowRegex = /<tr>[\s\S]*?<td[^>]*>(\d{4,6}[A-Z0-9]*)\u3000([^<]+)<\/td>[\s\S]*?<td[^>]*>[^<]*<\/td>[\s\S]*?<td[^>]*>上市<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/g;
-        let match;
-        while ((match = rowRegex.exec(html)) !== null) {
-          const symbol = match[1].trim();
-          const sector = match[3].trim();
-          if (/^\d{4}$/.test(symbol) && sector) {
-            twseSectorMap.set(symbol, sector);
-          }
-        }
-        console.log(`[fetchStockList] TWSE sector map (ISIN scrape): ${twseSectorMap.size} entries`);
-      } else {
-        console.error(`[fetchStockList] TWSE ISIN sector scrape HTTP ${res.status}`);
-      }
-    } catch (err) {
-      console.error('[fetchStockList] TWSE ISIN sector scrape failed:', err);
-    }
-
     const twseStocks: RawStockInfo[] = twseRows
       .filter(r => r['公司代號'])
       .map(r => ({
         symbol:             r['公司代號'].trim(),
         name_zh:            r['公司簡稱']?.trim() ?? '',
-        sector:             twseSectorMap.get(r['公司代號'].trim()) ?? '',
+        sector:             '', // populated separately -- see note above
         market:             'TWSE' as const,
         shares_outstanding: parseInt(r['已發行普通股數或TDR原股發行股數']?.replace(/,/g, '') ?? '0', 10) || null,
       }));
