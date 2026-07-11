@@ -101,10 +101,34 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // Session 79: even after fixing the institutional_flows AND daily_prices
+  // joins to LATERAL, 半導體族群 still returns 0 samples. Check whether
+  // these 111 stocks have ANY daily_prices row at all (not just recent) --
+  // if daily_prices ingestion hasn't reached them yet (same as the
+  // institutional_flows gap above), no query fix can produce a return,
+  // since Step 2 of the backtest fundamentally needs at least one price
+  // row to compute return_pct.
+  const dailyPricesCoverageCheck = await queryUnsafe(
+    `SELECT
+       COUNT(*)::int AS total_semiconductor_stocks,
+       COUNT(*) FILTER (WHERE dp.symbol IS NOT NULL)::int AS have_any_daily_price_row,
+       MIN(dp.latest_date)::text AS earliest_latest_date,
+       MAX(dp.latest_date)::text AS latest_latest_date
+     FROM stocks s
+     LEFT JOIN LATERAL (
+       SELECT symbol, MAX(date) AS latest_date
+       FROM daily_prices
+       WHERE symbol = s.symbol
+       GROUP BY symbol
+     ) dp ON true
+     WHERE s.sector = '半導體業'`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
-    semiconductorJoinCheck,
+    semiconductorJoinCheck, dailyPricesCoverageCheck,
   });
 
 }
