@@ -39,14 +39,20 @@ export async function GET(req: NextRequest) {
 
   for (const { symbol } of symbols) {
     try {
-      // Fetch all dividend records for this symbol, newest first
+      // Fetch all dividend records for this symbol, newest first.
+      // ex_dividend_date is cast to text here -- the DB driver returns DATE
+      // columns as JS Date objects by default, and comparing a Date object
+      // to a string with `>` (as this function does below) silently
+      // evaluates to false every time instead of throwing, which made every
+      // stock look like it had 0 payouts in the trailing window. Casting to
+      // text guarantees a plain 'YYYY-MM-DD' string we can compare safely.
       const rows = await queryUnsafe<{
         year: number;
         period: string;
         cash_dividend: number;
         ex_dividend_date: string;
       }>(
-        `SELECT year, period, cash_dividend, ex_dividend_date
+        `SELECT year, period, cash_dividend, ex_dividend_date::text AS ex_dividend_date
          FROM dividends
          WHERE symbol = $1
          ORDER BY year DESC, period DESC`,
