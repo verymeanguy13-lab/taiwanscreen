@@ -8,6 +8,53 @@
 const BASE_URL      = 'https://openapi.twse.com.tw';
 const TPEX_BASE_URL = 'https://www.tpex.org.tw';
 
+// TWSE's official industry classification code table (產業別代碼).
+// t187ap03_L's '產業別' field returns a 2-digit numeric code, not a
+// readable name -- this table translates it. Source: TWSE's own
+// "上市公司產業類別劃分暨調整要點" classification standard, cross-checked
+// against Fugle's public developer docs (developer.fugle.tw). Codes 18 and
+// 34 are deprecated/no longer assigned to any stock but are kept here in
+// case older records still reference them.
+const TWSE_SECTOR_CODES: Record<string, string> = {
+  '01': '水泥工業',
+  '02': '食品工業',
+  '03': '塑膠工業',
+  '04': '紡織纖維',
+  '05': '電機機械',
+  '06': '電器電纜',
+  '08': '玻璃陶瓷',
+  '09': '造紙工業',
+  '10': '鋼鐵工業',
+  '11': '橡膠工業',
+  '12': '汽車工業',
+  '14': '建材營造',
+  '15': '航運業',
+  '16': '觀光餐旅',
+  '17': '金融保險',
+  '18': '貿易百貨', // deprecated code, kept for legacy records
+  '19': '綜合',
+  '20': '其他',
+  '21': '化學工業',
+  '22': '生技醫療業',
+  '23': '油電燃氣業',
+  '24': '半導體業',
+  '25': '電腦及週邊設備業',
+  '26': '光電業',
+  '27': '通信網路業',
+  '28': '電子零組件業',
+  '29': '電子通路業',
+  '30': '資訊服務業',
+  '31': '其他電子業',
+  '32': '文化創意業',
+  '33': '農業科技業',
+  '34': '電子商務', // deprecated code, kept for legacy records
+  '35': '綠能環保',
+  '36': '數位雲端',
+  '37': '運動休閒',
+  '38': '居家生活',
+  '80': '管理股票',
+};
+
 export interface RawStockPrice {
   symbol:     string;
   name_zh:    string;
@@ -372,14 +419,8 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
     type TWSEStockInfo = {
       '公司代號': string;
       '公司簡稱': string;
-      '產業別': string; // NOTE: numeric code (e.g. "24"), not a readable name --
-                         // sector for TWSE-listed stocks is populated
-                         // separately via /api/admin/backfill-twse-sector,
-                         // which does a single bulk UPDATE from the ISIN
-                         // page instead of doing it here per-stock (doing it
-                         // here would add a large HTML fetch+parse into the
-                         // hot path shared with the daily cron, risking a
-                         // timeout on Vercel Hobby's 10s limit).
+      '產業別': string; // numeric code (e.g. "24") -- translated to a
+                         // readable sector name via TWSE_SECTOR_CODES below.
       '已發行普通股數或TDR原股發行股數': string;
     };
 
@@ -389,7 +430,7 @@ export async function fetchStockList(): Promise<RawStockInfo[]> {
       .map(r => ({
         symbol:             r['公司代號'].trim(),
         name_zh:            r['公司簡稱']?.trim() ?? '',
-        sector:             '', // populated separately -- see note above
+        sector:             TWSE_SECTOR_CODES[r['產業別']?.trim()] ?? '',
         market:             'TWSE' as const,
         shares_outstanding: parseInt(r['已發行普通股數或TDR原股發行股數']?.replace(/,/g, '') ?? '0', 10) || null,
       }));
