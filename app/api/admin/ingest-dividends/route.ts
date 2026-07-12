@@ -169,6 +169,17 @@ export async function POST(req: NextRequest) {
 
         const payDate = d.CashDividendPaymentDate || null;
 
+        // `period` must distinguish separate payout events within the same
+        // year (so cron/weekly can tell a monthly payer from an annual one
+        // by counting distinct periods). Previously this was set to `d.year`
+        // -- the same value for every payout in a year -- which collapsed
+        // all distinct events together and made every stock look like an
+        // annual payer. Derive it from the ex-dividend date's month instead.
+        const exDateObj = new Date(exDate);
+        const periodValue = Number.isNaN(exDateObj.getTime())
+          ? (d.year ?? 'annual')
+          : String(exDateObj.getUTCMonth() + 1).padStart(2, '0');
+
         try {
           await queryUnsafe(
             `INSERT INTO dividends (
@@ -184,7 +195,7 @@ export async function POST(req: NextRequest) {
             [
               symbol,
               exDate,
-              d.year ?? 'annual',
+              periodValue,
               d.year ?? '',
               cashDiv,
               stockDiv,

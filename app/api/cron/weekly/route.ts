@@ -13,6 +13,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
 
+export const maxDuration = 300; // 5 minutes -- was hitting Hobby's 10s default
+
 export async function GET(req: NextRequest) {
   // ── 1. Validate cron secret — allow Vercel cron trigger OR manual secret ──
   const secret = req.headers.get('x-cron-secret');
