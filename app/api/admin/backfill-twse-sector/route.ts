@@ -39,7 +39,20 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       return NextResponse.json({ error: `ISIN fetch HTTP ${res.status}`, elapsedMs: Date.now() - t0 }, { status: 502 });
     }
-    html = await res.text();
+    // This page is served in Big5 (standard for Taiwanese gov/exchange
+    // sites), NOT UTF-8. res.text() decodes assuming UTF-8 by default,
+    // which corrupts every Chinese byte sequence into literal '?'
+    // characters -- silently breaking every downstream match. Decode the
+    // raw bytes explicitly as Big5 instead.
+    const buffer = await res.arrayBuffer();
+    try {
+      html = new TextDecoder('big5').decode(buffer);
+    } catch (decodeErr) {
+      return NextResponse.json(
+        { error: 'Big5 decode failed, falling back would corrupt data', detail: String(decodeErr), elapsedMs: Date.now() - t0 },
+        { status: 500 },
+      );
+    }
   } catch (err) {
     return NextResponse.json(
       { error: 'ISIN fetch failed (timeout or network error)', detail: String(err), elapsedMs: Date.now() - t0 },
