@@ -30,15 +30,20 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now();
 
   let html: string;
+  let contentType: string | null = null;
   try {
     const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=2', {
-      headers: { 'Accept': 'text/html' },
+      headers: {
+        'Accept': 'text/html',
+        'User-Agent': 'Mozilla/5.0 (compatible)',
+      },
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
       return NextResponse.json({ error: `ISIN fetch HTTP ${res.status}`, elapsedMs: Date.now() - t0 }, { status: 502 });
     }
+    contentType = res.headers.get('content-type');
     // This page is served in Big5 (standard for Taiwanese gov/exchange
     // sites), NOT UTF-8. res.text() decodes assuming UTF-8 by default,
     // which corrupts every Chinese byte sequence into literal '?'
@@ -49,7 +54,7 @@ export async function POST(req: NextRequest) {
       html = new TextDecoder('big5').decode(buffer);
     } catch (decodeErr) {
       return NextResponse.json(
-        { error: 'Big5 decode failed, falling back would corrupt data', detail: String(decodeErr), elapsedMs: Date.now() - t0 },
+        { error: 'Big5 decode failed, falling back would corrupt data', detail: String(decodeErr), contentType, elapsedMs: Date.now() - t0 },
         { status: 500 },
       );
     }
@@ -118,6 +123,7 @@ export async function POST(req: NextRequest) {
         error: 'No rows parsed from ISIN page -- page structure may have changed',
         htmlLength,
         rowCount,
+        contentType,
         htmlPreview: html.slice(0, 500),
         fetchMs: t1 - t0,
         parseMs: t2 - t1,
