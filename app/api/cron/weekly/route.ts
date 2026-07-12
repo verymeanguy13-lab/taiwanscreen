@@ -85,11 +85,27 @@ export async function GET(req: NextRequest) {
       const next_ex_date = upcoming?.ex_dividend_date ?? null;
 
       // ── dividend_frequency ───────────────────────────────────────────────
-      const recentYear = rows[0]?.year;
-      const periodsThisYear = [
-        ...new Set(rows.filter(r => r.year === recentYear).map(r => r.period)),
-      ];
-      const freq = periodsThisYear.length;
+      // Previously this counted distinct periods within rows[0]'s calendar
+      // year only. That's unreliable for most of the year: e.g. checked in
+      // July, a genuinely quarterly payer has usually only had 1 payout so
+      // far in the current year, making it indistinguishable from a true
+      // annual payer. Instead, look at the trailing 365 days ending at the
+      // stock's own most recent ex-dividend date -- that always captures
+      // one full payout cycle regardless of where we are in the calendar.
+      const exDatesSorted = rows
+        .map(r => r.ex_dividend_date)
+        .filter((d): d is string => !!d)
+        .sort()
+        .reverse();
+      const mostRecentExDate = exDatesSorted[0] ?? null;
+
+      let freq = 1;
+      if (mostRecentExDate) {
+        const cutoff = new Date(mostRecentExDate);
+        cutoff.setUTCDate(cutoff.getUTCDate() - 365);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        freq = new Set(exDatesSorted.filter(d => d > cutoffStr)).size;
+      }
       const dividend_frequency =
         freq >= 12 ? 'monthly'
         : freq >= 4  ? 'quarterly'
