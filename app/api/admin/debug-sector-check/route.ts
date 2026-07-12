@@ -72,9 +72,19 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // 4) The actual remaining blank-sector TWSE symbols, to inspect edge cases.
+  const blankSectorSymbols = await queryUnsafe(
+    `SELECT symbol, name_zh, market
+     FROM stocks
+     WHERE (sector = '' OR sector IS NULL) AND market = 'TWSE'
+     ORDER BY symbol`,
+    [],
+  );
+
   return NextResponse.json({
     rawFetchResult,
     dbRows,
     blankSectorByMarket,
+    blankSectorSymbols,
   });
 }
