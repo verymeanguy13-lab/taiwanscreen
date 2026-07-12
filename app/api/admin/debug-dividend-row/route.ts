@@ -172,11 +172,37 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // Investigating why dividend_frequency is always 'annual' or null, and
+  // stability_score never exceeds 8: checking the raw dividends table for a
+  // known monthly-payout ETF (00919) to see what `period` actually holds,
+  // and whether ingest-dividends' ON CONFLICT (symbol, ex_dividend_date)
+  // clause -- which doesn't match any constraint visible in schema.sql --
+  // is silently failing on every insert.
+  const rawDividends00919 = await queryUnsafe(
+    `SELECT symbol, year, period, cash_dividend, ex_dividend_date
+     FROM dividends WHERE symbol = '00919' ORDER BY ex_dividend_date DESC LIMIT 20`,
+    [],
+  );
+  const periodEqualsYearCheck = await queryUnsafe(
+    `SELECT
+       COUNT(*)::int AS total_rows,
+       COUNT(*) FILTER (WHERE period = year::text)::int AS period_equals_year_rows,
+       COUNT(DISTINCT symbol)::int AS distinct_symbols
+     FROM dividends`,
+    [],
+  );
+  const rowsPerSymbolPerYear = await queryUnsafe(
+    `SELECT symbol, year, COUNT(*)::int AS rows_this_year
+     FROM dividends WHERE symbol = '00919' GROUP BY symbol, year ORDER BY year DESC`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
     semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
     semiconductorByMarketCheck, tsmcPriceCheck,
+    rawDividends00919, periodEqualsYearCheck, rowsPerSymbolPerYear,
   });
 
 
