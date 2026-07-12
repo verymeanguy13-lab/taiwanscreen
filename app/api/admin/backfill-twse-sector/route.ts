@@ -10,10 +10,13 @@
 // or once to backfill the ~1,090 stocks that were missing it), not daily.
 //
 // NOTE: the strMode=2 ISIN page lists ALL listed securities (stocks, ETFs,
-// bonds, TDRs, warrants, preferred shares, etc), not just common stocks --
-// likely a much larger page than the TPEx (strMode=4) one. Wrapped every
-// step in try/catch with timing so a failure (timeout, bad response shape,
-// regex taking too long) surfaces a real error instead of a bare 500.
+// bonds, TDRs, warrants, preferred shares, etc) -- a much larger page than
+// TPEx's (strMode=4). The original single lazy [\s\S]*? regex spanning the
+// whole document was likely suffering catastrophic backtracking on a
+// document this size, hanging well past Vercel's 10s limit instead of
+// erroring cleanly. Rewritten to split on <tr> first (a cheap, linear
+// string operation) and then run a small, bounded regex against each row
+// individually -- no backtracking risk regardless of document size.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
@@ -49,20 +52,47 @@ export async function POST(req: NextRequest) {
 
   let symbols: string[] = [];
   let sectors: string[] = [];
+  let rowCount = 0;
   try {
-    const rowRegex = /<tr>[\s\S]*?<td[^>]*>(\d{4,6}[A-Z0-9]*)\u3000([^<]+)<\/td>[\s\S]*?<td[^>]*>[^<]*<\/td>[\s\S]*?<td[^>]*>上市<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/g;
-    let match;
-    while ((match = rowRegex.exec(html)) !== null) {
-      const symbol = match[1].trim();
-      const sector = match[3].trim();
-      if (/^\d{4}$/.test(symbol) && sector) {
-        symbols.push(symbol);
-        sectors.push(sector);
+    // Cheap linear split instead of one big backtracking-prone regex.
+    const rows = html.split('<tr>');
+    rowCount = rows.length;
+
+    // Per-row regex: bounded to a single <tr>...</tr> chunk, so even if a
+    // row is malformed there's no risk of runaway backtracking across the
+    // whole document.
+    const cellRegex = /<td[^>]*>([^<]*)<\/td>/g;
+
+    for (const row of rows) {
+      if (!row.includes('\u3000')) continue; // quick pre-filter: symbol／name separator
+      const cells: string[] = [];
+      let m;
+      cellRegex.lastIndex = 0;
+      while ((m = cellRegex.exec(row)) !== null) {
+        cells.push(m[1]);
+        if (cells.length > 10) break; // safety cap, rows only need a few cells
       }
+      if (cells.length < 5) continue;
+
+      const first = cells[0] ?? '';
+      const sepIdx = first.indexOf('\u3000');
+      if (sepIdx < 1) continue;
+      const symbol = first.slice(0, sepIdx).trim();
+      if (!/^\d{4}$/.test(symbol)) continue;
+
+      // market-type cell should read exactly '上市'
+      const marketCell = (cells[2] ?? '').trim();
+      if (marketCell !== '上市') continue;
+
+      const sector = (cells[3] ?? '').trim();
+      if (!sector) continue;
+
+      symbols.push(symbol);
+      sectors.push(sector);
     }
   } catch (err) {
     return NextResponse.json(
-      { error: 'Regex parsing failed', detail: String(err), htmlLength, elapsedMs: Date.now() - t0 },
+      { error: 'Parsing failed', detail: String(err), htmlLength, rowCount, elapsedMs: Date.now() - t0 },
       { status: 500 },
     );
   }
@@ -74,6 +104,7 @@ export async function POST(req: NextRequest) {
       {
         error: 'No rows parsed from ISIN page -- page structure may have changed',
         htmlLength,
+        rowCount,
         htmlPreview: html.slice(0, 500),
         fetchMs: t1 - t0,
         parseMs: t2 - t1,
@@ -100,6 +131,7 @@ export async function POST(req: NextRequest) {
       parsedFromPage: symbols.length,
       updatedInDb: result.length,
       htmlLength,
+      rowCount,
       fetchMs: t1 - t0,
       parseMs: t2 - t1,
       dbMs:    t3 - t2,
