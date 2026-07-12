@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
     const res = await fetch('https://isin.twse.com.tw/isin/C_public.jsp?strMode=2', {
       headers: {
         'Accept': 'text/html',
+        'Accept-Charset': 'big5,utf-8;q=0.7,*;q=0.3',
+        'Accept-Language': 'zh-TW,zh;q=0.9',
         'User-Agent': 'Mozilla/5.0 (compatible)',
       },
       cache: 'no-store',
