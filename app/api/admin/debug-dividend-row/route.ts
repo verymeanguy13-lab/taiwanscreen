@@ -259,6 +259,40 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // ── NEW (Session 81): the FULL backtest matchingRows query, byte-for-byte
+  // identical to app/api/backtest/route.ts including every LATERAL join,
+  // with a hardcoded startDate matching what a real '6M' period request
+  // would compute today. If this comes back empty while minimalMonthlyCheck
+  // above came back populated, the bug is specifically in one of these
+  // LATERAL joins or in how the parameters bind — not in the data itself.
+  const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const fullQueryReproMonthly = await queryUnsafe(
+    `SELECT s.symbol, s.name_zh
+     FROM stocks s
+     LEFT JOIN LATERAL (
+       SELECT close, change_pct, volume, date
+       FROM daily_prices
+       WHERE symbol = s.symbol AND date <= '${sixMonthsAgo}'
+       ORDER BY date DESC
+       LIMIT 1
+     ) dp ON true
+     LEFT JOIN LATERAL (
+       SELECT
+         (SELECT pe_ratio FROM fundamentals WHERE symbol = s.symbol AND pe_ratio IS NOT NULL ORDER BY period DESC LIMIT 1) AS pe_ratio
+     ) f ON true
+     LEFT JOIN LATERAL (
+       SELECT foreign_net, trust_net, dealer_net,
+              foreign_consecutive_days, trust_consecutive_days, triple_buy
+       FROM institutional_flows
+       WHERE symbol = s.symbol AND date <= '${sixMonthsAgo}'
+       ORDER BY date DESC
+       LIMIT 1
+     ) i ON true
+     LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
+     WHERE ds.latest_yield_pct >= $1 AND ds.dividend_frequency = $2`,
+    [3, 'monthly'],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -269,5 +303,6 @@ export async function POST(req: NextRequest) {
     todayIngestCheck, marginOrphanSample, marginOrphanCount,
     offsetCheck,
     minimalMonthlyCheck, minimalQuarterlyCheck, exactSymbolCheck,
+    fullQueryReproMonthly, sixMonthsAgo,
   });
 }
