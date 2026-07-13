@@ -184,6 +184,35 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // ── NEW (Session 81): why did today's cron/daily run report prices=0 and
+  // institutional=0? Check whether today's date already had >100 daily_prices
+  // rows (triggering ingestDailyPrices' skip-safety-check) vs genuinely zero,
+  // and same for institutional_flows (which has no such skip check, so zero
+  // there most likely means TWSE's T86 endpoint hadn't published yet).
+  const todayIngestCheck = await queryUnsafe(
+    `SELECT
+       (SELECT COUNT(*)::int FROM daily_prices WHERE date = CURRENT_DATE) AS prices_today_count,
+       (SELECT COUNT(*)::int FROM institutional_flows WHERE date = CURRENT_DATE) AS institutional_today_count,
+       (SELECT MAX(date)::text FROM daily_prices) AS global_max_price_date,
+       (SELECT MAX(date)::text FROM institutional_flows) AS global_max_institutional_date`,
+    [],
+  );
+
+  // Which margin_data symbols are hitting the FK violation against stocks,
+  // and are they a known pattern (leveraged/inverse/bond ETFs, new listings
+  // not yet in fetchStockList's source) rather than a real ingestion bug?
+  const marginOrphanSample = await queryUnsafe(
+    `SELECT DISTINCT symbol FROM margin_data
+     WHERE symbol NOT IN (SELECT symbol FROM stocks)
+     ORDER BY symbol LIMIT 30`,
+    [],
+  );
+  const marginOrphanCount = await queryUnsafe(
+    `SELECT COUNT(DISTINCT symbol)::int AS orphan_symbol_count
+     FROM margin_data WHERE symbol NOT IN (SELECT symbol FROM stocks)`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -191,5 +220,6 @@ export async function POST(req: NextRequest) {
     semiconductorByMarketCheck, tsmcPriceCheck,
     rawDividends00919, periodEqualsYearCheck, rowsPerSymbolPerYear,
     yieldGapCheck,
+    todayIngestCheck, marginOrphanSample, marginOrphanCount,
   });
 }
