@@ -289,7 +289,7 @@ export async function ingestFundamentals(): Promise<IngestResult> {
       );
       count++;
 
-      if (f.dividend_yield !== null) {
+      if (f.dividend_yield !== null && f.dividend_yield > 0) {
         await queryUnsafe(
           `INSERT INTO dividend_summary (symbol, latest_yield_pct)
            VALUES ($1, $2)
