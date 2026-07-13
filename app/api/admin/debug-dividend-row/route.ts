@@ -233,6 +233,32 @@ export async function POST(req: NextRequest) {
     [targetSymbols],
   );
 
+  // ── NEW (Session 81): reproduce the backtest's exact WHERE conditions
+  // directly against stocks + dividend_summary, stripped of every LATERAL
+  // join and startDate logic, to isolate whether the join itself is the
+  // problem or something else entirely.
+  const minimalMonthlyCheck = await queryUnsafe(
+    `SELECT s.symbol, s.name_zh, ds.dividend_frequency, ds.latest_yield_pct
+     FROM stocks s
+     LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
+     WHERE ds.dividend_frequency = 'monthly' AND ds.latest_yield_pct >= 3`,
+    [],
+  );
+  const minimalQuarterlyCheck = await queryUnsafe(
+    `SELECT s.symbol, s.name_zh, ds.dividend_frequency, ds.latest_yield_pct
+     FROM stocks s
+     LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
+     WHERE ds.dividend_frequency = 'quarterly' AND ds.latest_yield_pct >= 4`,
+    [],
+  );
+  // Same check but confirming these symbols exist in `stocks` at all with
+  // an exact-match, case/whitespace-sensitive equality check
+  const exactSymbolCheck = await queryUnsafe(
+    `SELECT symbol, name_zh, LENGTH(symbol) AS symbol_len
+     FROM stocks WHERE symbol IN ('00929', '0056', '00919')`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -242,5 +268,6 @@ export async function POST(req: NextRequest) {
     yieldGapCheck,
     todayIngestCheck, marginOrphanSample, marginOrphanCount,
     offsetCheck,
+    minimalMonthlyCheck, minimalQuarterlyCheck, exactSymbolCheck,
   });
 }
