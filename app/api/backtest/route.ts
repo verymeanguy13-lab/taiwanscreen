@@ -252,6 +252,9 @@ export async function POST(req: NextRequest) {
           sample_count: 0, win_rate: 0, avg_return: 0,
           results: [], top5: [], bottom5: [],
         },
+        // TEMPORARY DEBUG (Session 81) — remove once monthly_income/quarterly_dividend
+        // presets are confirmed working. Shows exactly what SQL ran and why 0 rows matched.
+        _debug: { whereClause, params, filters, matchingRowsCount: matchingRows.length },
       });
     }
 
