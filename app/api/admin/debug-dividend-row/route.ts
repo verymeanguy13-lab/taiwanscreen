@@ -213,6 +213,26 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // ── NEW (Session 81): find the exact offset of each yield-gap ETF within
+  // ingest-dividends' own ordering (symbol, filtered to stocks with recent
+  // daily_prices), so we can target them directly instead of batching
+  // through the whole alphabet.
+  const targetSymbols = ['0056', '00713', '00850', '00878', '00891', '00919', '00929'];
+  const offsetCheck = await queryUnsafe(
+    `WITH ordered AS (
+       SELECT s.symbol, ROW_NUMBER() OVER (ORDER BY s.symbol) - 1 AS rn
+       FROM stocks s
+       JOIN daily_prices dp ON dp.symbol = s.symbol
+       WHERE dp.date >= NOW() - INTERVAL '30 days'
+       GROUP BY s.symbol
+     )
+     SELECT symbol, rn AS offset
+     FROM ordered
+     WHERE symbol = ANY($1)
+     ORDER BY rn`,
+    [targetSymbols],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -221,5 +241,6 @@ export async function POST(req: NextRequest) {
     rawDividends00919, periodEqualsYearCheck, rowsPerSymbolPerYear,
     yieldGapCheck,
     todayIngestCheck, marginOrphanSample, marginOrphanCount,
+    offsetCheck,
   });
 }
