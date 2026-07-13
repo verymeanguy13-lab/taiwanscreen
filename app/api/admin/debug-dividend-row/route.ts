@@ -101,13 +101,6 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  // Session 79: even after fixing the institutional_flows AND daily_prices
-  // joins to LATERAL, 半導體族群 still returns 0 samples. Check whether
-  // these 111 stocks have ANY daily_prices row at all (not just recent) --
-  // if daily_prices ingestion hasn't reached them yet (same as the
-  // institutional_flows gap above), no query fix can produce a return,
-  // since Step 2 of the backtest fundamentally needs at least one price
-  // row to compute return_pct.
   const dailyPricesCoverageCheck = await queryUnsafe(
     `SELECT
        COUNT(*)::int AS total_semiconductor_stocks,
@@ -125,11 +118,6 @@ export async function POST(req: NextRequest) {
     [],
   );
 
- // Session 79: is the 2026-06-05 staleness specific to the semiconductor
-  // sector, or is the ENTIRE daily_prices table frozen at that date (i.e.
-  // fetchAllStockPrices/ingestDailyPrices has been silently failing site-wide
-  // every day since then)? This is the single most important thing to know
-  // before chasing this further.
   const globalPricesFreshnessCheck = await queryUnsafe(
     `SELECT
        MAX(date)::text                              AS global_latest_date,
@@ -140,11 +128,6 @@ export async function POST(req: NextRequest) {
     [],
   );
 
- // Site-wide ingestion is fine (confirmed by globalPricesFreshnessCheck),
-  // so the semiconductor staleness is sector-specific. Break it down by
-  // market (TWSE vs TPEx) to check whether this is the previously-known
-  // "TPEx bulk prices blocked from Vercel datacenter IPs" issue, or
-  // whether even TWSE-listed semiconductor names (e.g. 2330) are affected.
   const semiconductorByMarketCheck = await queryUnsafe(
     `SELECT
        s.market,
@@ -163,21 +146,12 @@ export async function POST(req: NextRequest) {
     [],
   );
 
-  // Specifically check 2330 (TSMC, TWSE-listed large cap) since it's the
-  // clearest single data point: if even 2330 is stuck at June 5, the
-  // problem isn't TPEx-specific.
   const tsmcPriceCheck = await queryUnsafe(
     `SELECT symbol, MAX(date)::text AS latest_date, COUNT(*)::int AS total_rows
      FROM daily_prices WHERE symbol = '2330' GROUP BY symbol`,
     [],
   );
 
-  // Investigating why dividend_frequency is always 'annual' or null, and
-  // stability_score never exceeds 8: checking the raw dividends table for a
-  // known monthly-payout ETF (00919) to see what `period` actually holds,
-  // and whether ingest-dividends' ON CONFLICT (symbol, ex_dividend_date)
-  // clause -- which doesn't match any constraint visible in schema.sql --
-  // is silently failing on every insert.
   const rawDividends00919 = await queryUnsafe(
     `SELECT symbol, year, period, cash_dividend, ex_dividend_date
      FROM dividends WHERE symbol = '00919' ORDER BY ex_dividend_date DESC LIMIT 20`,
@@ -197,14 +171,25 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // ── NEW (Session 81): does latest_yield_pct actually clear the preset's
+  // yield_min threshold for the 8 stocks now correctly classified as
+  // monthly/quarterly? If null or too low, that's the real remaining gap —
+  // not the period/frequency/date bugs fixed last session.
+  const yieldGapCheck = await queryUnsafe(
+    `SELECT symbol, dividend_frequency, stability_score, latest_yield_pct,
+            consecutive_years
+     FROM dividend_summary
+     WHERE dividend_frequency IN ('monthly', 'quarterly')
+     ORDER BY dividend_frequency, latest_yield_pct DESC NULLS LAST`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
     semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
     semiconductorByMarketCheck, tsmcPriceCheck,
     rawDividends00919, periodEqualsYearCheck, rowsPerSymbolPerYear,
+    yieldGapCheck,
   });
-
-
-
 }
