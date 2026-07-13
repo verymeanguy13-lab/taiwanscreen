@@ -293,6 +293,27 @@ export async function POST(req: NextRequest) {
     [3, 'monthly'],
   );
 
+  // ── NEW (Session 81): do these ETFs actually have daily_prices going back
+  // to the backtest's startDate (2026-01-14 for a 6M period)? Step 2 of the
+  // backtest requires a price row ON OR BEFORE startDate to compute a return
+  // — if a symbol matches the dividend filter but has no price history that
+  // far back, it silently drops out at the return-calc stage instead of the
+  // early matchingRows.length===0 branch, which explains the missing _debug
+  // field in the real /api/backtest response.
+  const priceHistoryCheck = await queryUnsafe(
+    `SELECT
+       s.symbol,
+       MIN(dp.date)::text AS earliest_price_date,
+       MAX(dp.date)::text AS latest_price_date,
+       COUNT(*) FILTER (WHERE dp.date <= '2026-01-14')::int AS rows_on_or_before_startdate
+     FROM stocks s
+     LEFT JOIN daily_prices dp ON dp.symbol = s.symbol
+     WHERE s.symbol IN ('0056', '00713', '00850', '00878', '00891', '00919', '00929')
+     GROUP BY s.symbol
+     ORDER BY s.symbol`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -304,5 +325,6 @@ export async function POST(req: NextRequest) {
     offsetCheck,
     minimalMonthlyCheck, minimalQuarterlyCheck, exactSymbolCheck,
     fullQueryReproMonthly, sixMonthsAgo,
+    priceHistoryCheck,
   });
 }
