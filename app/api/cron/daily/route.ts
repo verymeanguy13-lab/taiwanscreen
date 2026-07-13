@@ -19,7 +19,8 @@ import {
   ingestInstitutionalFlows,
   ingestMarginData,
 } from '@/lib/ingest';
-
+export const maxDuration = 300; // Hobby default is 10s — this does multi-day backfill
+                                  // + 4 sequential ingest steps, same reason cron/weekly needed this
 const sql = neon(process.env.DATABASE_URL!);
 
 function toTWSEDate(d: Date): string {
