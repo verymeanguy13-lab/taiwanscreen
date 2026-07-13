@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
   const backfillResults: Record<string, number> = {};
 
   const recentDays = pastBusinessDays(3);
-  const [latestPrice] = await sql`SELECT MAX(date) as d FROM daily_prices`;
+  const [latestPrice] = await sql`SELECT MAX(date)::text as d FROM daily_prices`;
   const latestPriceDate = latestPrice?.d ? String(latestPrice.d).slice(0, 10) : null;
 
   for (const day of recentDays) {
