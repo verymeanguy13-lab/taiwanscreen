@@ -142,6 +142,7 @@ export default function WatchlistPage() {
   const { data: res, isLoading }  = useSWR(
     status === 'authenticated' ? '/api/watchlist' : null,
     fetcher,
+    { refreshInterval: 60000 }, // auto-refresh every 60s
   );
 
   const [editingId,   setEditingId]   = useState<number | null>(null);
