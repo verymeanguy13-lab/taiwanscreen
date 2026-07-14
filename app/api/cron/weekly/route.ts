@@ -62,11 +62,23 @@ export async function GET(req: NextRequest) {
       if (rows.length === 0) continue;
 
       // ── consecutive_years ────────────────────────────────────────────────
+      // FIX (Session 82): `dividends.year` is INT in the schema, but the Neon
+      // driver returns it here as a STRING at runtime (confirmed via direct
+      // query — same class of driver-vs-TypeScript-type surprise as the
+      // DATE-vs-string bugs found in Sessions 80–81, just for an INT column
+      // this time). The gap-check below compares yearsWithDividend[i] (a
+      // string) against yearsWithDividend[i-1] - 1 (a number produced by
+      // subtraction). `===` never coerces types, so that comparison was
+      // ALWAYS false, meaning consecutiveYears could only ever end up as 1
+      // for every single stock — which silently capped stability_score at a
+      // hard ceiling of 28 (monthly) / 18 (quarterly), far below the 80
+      // threshold the "配息穩定" preset requires, making it unreachable for
+      // any stock. Forcing Number(r.year) here fixes the comparison.
       const yearsWithDividend = [
         ...new Set(
           rows
             .filter(r => (r.cash_dividend ?? 0) > 0)
-            .map(r => r.year),
+            .map(r => Number(r.year)),
         ),
       ].sort((a, b) => b - a);
 
