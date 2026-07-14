@@ -77,6 +77,42 @@ async function refreshDividendSummary(symbol: string): Promise<void> {
 
   const latest = latestRows[0];
 
+  // FIX (Session 82): previously annualDividend used a blanket ×4 for any
+  // stock with dividend history (assuming quarterly), which understated
+  // genuine monthly payers by ~3x (confirmed: 00929's yield was showing
+  // 3.44% when its real yield is closer to ~10%) and would similarly
+  // overstate true semi-annual/annual payers. Now detects real per-stock
+  // frequency the same way cron/weekly does — counting distinct ex-dividend
+  // dates in the trailing 365 days ending at the stock's own most recent
+  // ex-date, which correctly captures one full payout cycle regardless of
+  // where we are in the calendar — and picks the matching multiplier
+  // (×12 monthly, ×4 quarterly, ×2 semi-annual, ×1 annual) instead of a
+  // flat assumption.
+  const exDateRows = await queryUnsafe<{ ex_dividend_date: string }>(
+    `SELECT ex_dividend_date::text AS ex_dividend_date
+     FROM dividends
+     WHERE symbol = $1
+       AND cash_dividend > 0
+       AND ex_dividend_date IS NOT NULL
+     ORDER BY ex_dividend_date DESC`,
+    [symbol],
+  );
+  const exDatesSorted = exDateRows.map(r => r.ex_dividend_date);
+  const mostRecentExDate = exDatesSorted[0] ?? null;
+
+  let payoutsPerYear = 1;
+  if (mostRecentExDate) {
+    const cutoff = new Date(mostRecentExDate);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 365);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    payoutsPerYear = new Set(exDatesSorted.filter(d => d > cutoffStr)).size || 1;
+  }
+  const annualizeMultiplier =
+    payoutsPerYear >= 12 ? 12
+    : payoutsPerYear >= 4  ? 4
+    : payoutsPerYear >= 2  ? 2
+    : 1;
+
   // Get current stock price to compute yield
   const priceRows = await queryUnsafe<{ close: number }>(
     `SELECT close FROM daily_prices
@@ -87,10 +123,10 @@ async function refreshDividendSummary(symbol: string): Promise<void> {
   );
   const price = priceRows[0]?.close ?? null;
 
-  // Annualise the latest quarterly dividend (×4) to estimate yield
-  // If annual dividend already, use as-is (heuristic: if > 3 dividends/year, it's quarterly)
+  // Annualize the latest payout using the real per-stock frequency detected
+  // above, instead of a blanket ×4 assumption.
   const annualDividend = latest?.cash_dividend
-    ? latest.cash_dividend * (consecutiveYears > 0 && yearRows.length > 0 ? 4 : 1)
+    ? latest.cash_dividend * annualizeMultiplier
     : null;
 
   const yieldPct =
