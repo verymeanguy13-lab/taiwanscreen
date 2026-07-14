@@ -358,7 +358,23 @@ export async function POST(req: NextRequest) {
      ORDER BY s.symbol`,
     [],
   );
-
+// ── NEW (Session 83): watchlist for 2637 shows NT$84.70, but the stock
+  // detail page shows NT$83.80 (correct, matches 52週高 84.70 separately).
+  // This pulls the last 5 daily_prices rows for 2637 to see what's actually
+  // stored — is the "latest" row's close genuinely wrong, or is the global
+  // MAX(date) join landing on a stale, non-latest row for this symbol?
+  const symbol2637PriceCheck = await queryUnsafe(
+    `SELECT date::text, open, high, low, close, change_pct
+     FROM daily_prices
+     WHERE symbol = '2637'
+     ORDER BY date DESC
+     LIMIT 5`,
+    [],
+  );
+  const globalMaxDateCheck = await queryUnsafe(
+    `SELECT MAX(date)::text AS global_max_date FROM daily_prices`,
+    [],
+  );
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -373,5 +389,7 @@ export async function POST(req: NextRequest) {
     minimalMonthlyCheck, minimalQuarterlyCheck, exactSymbolCheck,
     fullQueryReproMonthly, sixMonthsAgo,
     priceHistoryCheck,
+    symbol2637PriceCheck, globalMaxDateCheck,
   });
+
 }
