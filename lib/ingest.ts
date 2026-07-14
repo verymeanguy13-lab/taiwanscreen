@@ -140,12 +140,7 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
   }
 
   try {
-    await queryUnsafe(
-      `UPDATE institutional_flows
-       SET triple_buy = (foreign_net > 0 AND trust_net > 0 AND dealer_net > 0)
-       WHERE date = $1`,
-      [date],
-    );
+    await computeTripleBuy(date);
   } catch (err) {
     const msg = `[ingestInstitutionalFlows] Failed to compute triple_buy: ${err}`;
     console.error(msg);
@@ -156,6 +151,15 @@ export async function ingestInstitutionalFlows(date: string): Promise<IngestResu
 
   console.log(`[ingestInstitutionalFlows] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
+}
+
+export async function computeTripleBuy(date: string): Promise<void> {
+  await queryUnsafe(
+    `UPDATE institutional_flows
+     SET triple_buy = (foreign_net > 0 AND trust_net > 0 AND dealer_net > 0)
+     WHERE date = $1`,
+    [date],
+  );
 }
 
 export async function computeConsecutiveDays(date: string): Promise<void> {
