@@ -128,6 +128,33 @@ export async function POST(req: NextRequest) {
     [],
   );
 
+  // ── NEW (Session 82): the definitive systemic-vs-ETF-specific check from
+  // the Session 81 handoff — global MIN(date) across the WHOLE daily_prices
+  // table, plus a direct spot-check on several long-listed ordinary stocks
+  // (TSMC, Hon Hai, MediaTek, Formosa Plastics, Chunghwa Telecom) that have
+  // obviously existed for decades, to see whether THEY are also capped at
+  // ~March 2026 or have genuinely deep history.
+  const globalPriceHistoryDepthCheck = await queryUnsafe(
+    `SELECT
+       MIN(date)::text              AS global_earliest_date,
+       MAX(date)::text              AS global_latest_date,
+       COUNT(DISTINCT symbol)::int  AS symbols_with_price_data
+     FROM daily_prices`,
+    [],
+  );
+
+  const ordinaryStockHistoryCheck = await queryUnsafe(
+    `SELECT symbol,
+            MIN(date)::text AS earliest_date,
+            MAX(date)::text AS latest_date,
+            COUNT(*)::int   AS total_rows
+     FROM daily_prices
+     WHERE symbol IN ('2330', '2317', '2454', '1301', '2412')
+     GROUP BY symbol
+     ORDER BY symbol`,
+    [],
+  );
+
   const semiconductorByMarketCheck = await queryUnsafe(
     `SELECT
        s.market,
@@ -318,6 +345,7 @@ export async function POST(req: NextRequest) {
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
     semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
+    globalPriceHistoryDepthCheck, ordinaryStockHistoryCheck,
     semiconductorByMarketCheck, tsmcPriceCheck,
     rawDividends00919, periodEqualsYearCheck, rowsPerSymbolPerYear,
     yieldGapCheck,
