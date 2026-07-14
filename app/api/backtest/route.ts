@@ -211,14 +211,30 @@ export async function POST(req: NextRequest) {
     // from PERIOD_DAYS, never user input directly), so it's safe to inline
     // into the LATERAL subquery below rather than thread it through as yet
     // another positional parameter alongside buildWhere()'s dynamic list.
+    //
+    // FIX (Session 82): the dp and i LATERAL joins below previously required
+    // date <= startDate with no fallback — same bug class as Step 2, just
+    // one stage earlier. For any period reaching before a symbol's earliest
+    // available data (daily_prices/institutional_flows both only go back to
+    // 2026-03-23 for every symbol), these returned NULL, which silently
+    // excluded that stock from EVERY filter touching dp.*/i.* columns
+    // (momentum, foreign_buy, triple_buy, foreign_trust_double,
+    // big_foreign_buy, and the market-cap fallback used by small_cap_growth/
+    // large_cap_quality) — even for periods well past 3M, since those
+    // presets' filters have nothing to do with the dividend-history depth
+    // fixed earlier. Both now fall back to the earliest available row when
+    // nothing exists on-or-before startDate, matching Step 2's approach.
     const matchingRows = await queryUnsafe<{ symbol: string; name_zh: string }>(
       `SELECT s.symbol, s.name_zh
        FROM stocks s
        LEFT JOIN LATERAL (
   SELECT close, change_pct, volume, date
   FROM daily_prices
-  WHERE symbol = s.symbol AND date <= '${startDate}'
-  ORDER BY date DESC
+  WHERE symbol = s.symbol
+    AND date = COALESCE(
+      (SELECT MAX(date) FROM daily_prices WHERE symbol = s.symbol AND date <= '${startDate}'),
+      (SELECT MIN(date) FROM daily_prices WHERE symbol = s.symbol)
+    )
   LIMIT 1
 ) dp ON true
        LEFT JOIN LATERAL (
@@ -236,8 +252,11 @@ export async function POST(req: NextRequest) {
          SELECT foreign_net, trust_net, dealer_net,
                 foreign_consecutive_days, trust_consecutive_days, triple_buy
          FROM institutional_flows
-         WHERE symbol = s.symbol AND date <= '${startDate}'
-         ORDER BY date DESC
+         WHERE symbol = s.symbol
+           AND date = COALESCE(
+             (SELECT MAX(date) FROM institutional_flows WHERE symbol = s.symbol AND date <= '${startDate}'),
+             (SELECT MIN(date) FROM institutional_flows WHERE symbol = s.symbol)
+           )
          LIMIT 1
        ) i ON true
        LEFT JOIN dividend_summary ds ON s.symbol = ds.symbol
