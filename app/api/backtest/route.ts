@@ -262,14 +262,29 @@ export async function POST(req: NextRequest) {
     const nameMap = new Map(matchingRows.map(r => [r.symbol, r.name_zh]));
 
     // ── Step 2: Compute return for each matching stock ────────────────────
+    // FIX (Session 82): previously required dp_start.date to equal EXACTLY
+    // the latest price on-or-before startDate — if a symbol's price history
+    // doesn't reach back that far (confirmed systemic: the whole daily_prices
+    // table only goes back to 2026-03-23 for every symbol, ETF or ordinary
+    // stock alike), that subquery returns NULL and the symbol silently drops
+    // out here, landing on the same sample_count: 0 shape as a symbol that
+    // never matched the filters at all. Now falls back to the symbol's
+    // EARLIEST available price when nothing exists on-or-before startDate,
+    // so every matched symbol gets a return computed from whatever history
+    // actually exists — "backtest from whenever we have data" instead of
+    // silently dropping the symbol. start_date is now also returned so the
+    // frontend/user can see when a result is based on a shorter window than
+    // requested.
     const returnRows = await queryUnsafe<{
       symbol:       string;
+      start_date:   string;
       start_close:  string | null;
       end_close:    string | null;
       return_pct:   string | null;
     }>(
       `SELECT
          dp_start.symbol,
+         dp_start.date::text AS start_date,
          dp_start.close  AS start_close,
          dp_end.close    AS end_close,
          CASE
@@ -290,10 +305,12 @@ export async function POST(req: NextRequest) {
        ) dp_end ON true
        WHERE dp_start.symbol = ANY($1)
          AND dp_start.date = (
-           SELECT MAX(date)
-           FROM daily_prices
-           WHERE symbol = dp_start.symbol
-             AND date <= $2
+           SELECT COALESCE(
+             (SELECT MAX(date) FROM daily_prices
+               WHERE symbol = dp_start.symbol AND date <= $2),
+             (SELECT MIN(date) FROM daily_prices
+               WHERE symbol = dp_start.symbol)
+           )
          )`,
       [symbols, startDate],
     );
@@ -302,11 +319,17 @@ export async function POST(req: NextRequest) {
     const results = returnRows
       .filter(r => r.return_pct != null)
       .map(r => ({
-        symbol:      r.symbol,
-        name_zh:     nameMap.get(r.symbol) ?? r.symbol,
-        start_close: parseFloat(r.start_close ?? '0'),
-        end_close:   parseFloat(r.end_close   ?? '0'),
-        return_pct:  parseFloat(r.return_pct  ?? '0'),
+        symbol:            r.symbol,
+        name_zh:           nameMap.get(r.symbol) ?? r.symbol,
+        start_close:       parseFloat(r.start_close ?? '0'),
+        end_close:         parseFloat(r.end_close   ?? '0'),
+        return_pct:        parseFloat(r.return_pct  ?? '0'),
+        start_date:        r.start_date,
+        // true when this symbol's price history didn't reach back to the
+        // requested startDate, so we fell back to its earliest available
+        // price instead — the return is measured over a shorter window
+        // than the requested period label implies.
+        used_shorter_window: r.start_date > startDate,
       }))
       .sort((a, b) => b.return_pct - a.return_pct);
 
