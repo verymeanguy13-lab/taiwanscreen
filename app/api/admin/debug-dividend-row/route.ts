@@ -327,6 +327,24 @@ export async function POST(req: NextRequest) {
   // far back, it silently drops out at the return-calc stage instead of the
   // early matchingRows.length===0 branch, which explains the missing _debug
   // field in the real /api/backtest response.
+  // ── NEW (Session 82): did the consecutive-days/triple_buy backfill
+  // actually populate historical rows, and does anything actually clear the
+  // foreign_buy/triple_buy presets' thresholds? The backfill call reported
+  // remaining:0 immediately, which could mean either it already finished in
+  // the background from the earlier cancelled request, or the detection
+  // query itself never found anything to do. This tells us which.
+  const consecutiveDaysBackfillCheck = await queryUnsafe(
+    `SELECT
+       COUNT(*)::int AS total_rows,
+       COUNT(foreign_consecutive_days)::int AS non_null_foreign_consecutive,
+       COUNT(*) FILTER (WHERE foreign_consecutive_days IS NULL)::int AS null_foreign_consecutive,
+       MAX(foreign_consecutive_days)::int AS max_foreign_consecutive,
+       COUNT(*) FILTER (WHERE foreign_consecutive_days >= 5)::int AS rows_ge_5,
+       COUNT(triple_buy)::int AS non_null_triple_buy,
+       COUNT(*) FILTER (WHERE triple_buy = true)::int AS true_triple_buy
+     FROM institutional_flows`,
+    [],
+  );
   const priceHistoryCheck = await queryUnsafe(
     `SELECT
        s.symbol,
@@ -344,6 +362,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
+    consecutiveDaysBackfillCheck,
     semiconductorJoinCheck, dailyPricesCoverageCheck, globalPricesFreshnessCheck,
     globalPriceHistoryDepthCheck, ordinaryStockHistoryCheck,
     semiconductorByMarketCheck, tsmcPriceCheck,
