@@ -358,7 +358,8 @@ export async function POST(req: NextRequest) {
      ORDER BY s.symbol`,
     [],
   );
-// ── NEW (Session 83): watchlist for 2637 shows NT$84.70, but the stock
+
+  // ── NEW (Session 83): watchlist for 2637 shows NT$84.70, but the stock
   // detail page shows NT$83.80 (correct, matches 52週高 84.70 separately).
   // This pulls the last 5 daily_prices rows for 2637 to see what's actually
   // stored — is the "latest" row's close genuinely wrong, or is the global
@@ -375,6 +376,11 @@ export async function POST(req: NextRequest) {
     `SELECT MAX(date)::text AS global_max_date FROM daily_prices`,
     [],
   );
+
+  // ── NEW (Session 83): total universe size — how many stocks total, split
+  // by market, and how many actually have a price row for today vs ever,
+  // to explain the gap between symbols_with_price_data (2014) and today's
+  // up+down+flat total (1989).
   const universeCheck = await queryUnsafe(
     `SELECT
        (SELECT COUNT(*)::int FROM stocks) AS total_stocks,
@@ -392,6 +398,32 @@ export async function POST(req: NextRequest) {
      LIMIT 20`,
     [],
   );
+
+  // ── NEW (Session 83): is TPEx staleness (flagged in Session 79-81, stuck
+  // at 2026-06-05) actually still happening market-wide, or did it resolve
+  // itself? The earlier semiconductorByMarketCheck (sector-scoped) showed
+  // TPEx current as of 2026-07-14, but that's only ~111 stocks — this checks
+  // the FULL TPEx market for a true picture.
+  const tpexFullMarketCheck = await queryUnsafe(
+    `SELECT
+       s.market,
+       COUNT(*)::int AS total_stocks,
+       COUNT(dp.symbol)::int AS have_any_price,
+       MIN(dp.latest_date)::text AS earliest_latest_date,
+       MAX(dp.latest_date)::text AS latest_latest_date,
+       COUNT(*) FILTER (WHERE dp.latest_date = (SELECT MAX(date) FROM daily_prices))::int AS stocks_current_today
+     FROM stocks s
+     LEFT JOIN LATERAL (
+       SELECT MAX(date) AS latest_date
+       FROM daily_prices
+       WHERE symbol = s.symbol
+     ) dp ON true
+     WHERE s.market IN ('TWSE', 'TPEx')
+     GROUP BY s.market
+     ORDER BY s.market`,
+    [],
+  );
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -408,6 +440,6 @@ export async function POST(req: NextRequest) {
     priceHistoryCheck,
     symbol2637PriceCheck, globalMaxDateCheck,
     universeCheck, stocksWithNoPriceEver,
+    tpexFullMarketCheck,
   });
-
 }
