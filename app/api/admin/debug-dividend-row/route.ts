@@ -408,7 +408,7 @@ export async function POST(req: NextRequest) {
     `SELECT
        s.market,
        COUNT(*)::int AS total_stocks,
-       COUNT(dp.symbol)::int AS have_any_price,
+       COUNT(dp.latest_date)::int AS have_any_price,
        MIN(dp.latest_date)::text AS earliest_latest_date,
        MAX(dp.latest_date)::text AS latest_latest_date,
        COUNT(*) FILTER (WHERE dp.latest_date = (SELECT MAX(date) FROM daily_prices))::int AS stocks_current_today
