@@ -375,6 +375,23 @@ export async function POST(req: NextRequest) {
     `SELECT MAX(date)::text AS global_max_date FROM daily_prices`,
     [],
   );
+  const universeCheck = await queryUnsafe(
+    `SELECT
+       (SELECT COUNT(*)::int FROM stocks) AS total_stocks,
+       (SELECT COUNT(*)::int FROM stocks WHERE market = 'TWSE') AS twse_stocks,
+       (SELECT COUNT(*)::int FROM stocks WHERE market = 'TPEx') AS tpex_stocks,
+       (SELECT COUNT(*)::int FROM stocks WHERE market NOT IN ('TWSE', 'TPEx') OR market IS NULL) AS other_or_null_market,
+       (SELECT COUNT(DISTINCT symbol)::int FROM daily_prices) AS symbols_with_any_price_ever,
+       (SELECT COUNT(DISTINCT symbol)::int FROM daily_prices WHERE date = (SELECT MAX(date) FROM daily_prices)) AS symbols_with_price_today`,
+    [],
+  );
+  const stocksWithNoPriceEver = await queryUnsafe(
+    `SELECT s.symbol, s.name_zh, s.market
+     FROM stocks s
+     WHERE NOT EXISTS (SELECT 1 FROM daily_prices dp WHERE dp.symbol = s.symbol)
+     LIMIT 20`,
+    [],
+  );
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
@@ -390,6 +407,7 @@ export async function POST(req: NextRequest) {
     fullQueryReproMonthly, sixMonthsAgo,
     priceHistoryCheck,
     symbol2637PriceCheck, globalMaxDateCheck,
+    universeCheck, stocksWithNoPriceEver,
   });
 
 }
