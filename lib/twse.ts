@@ -204,7 +204,7 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
       for (const row of priceTable.data) {
         if (row.length < 11) continue;
         const symbol = String(row[0]).trim();
-        if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+        if (!symbol || !/^\d{4,6}[A-Z]?$/.test(symbol)) continue;
 
         const name_zh    = String(row[1] ?? '').trim();
         const volume     = Math.round(clean(row[2]) / 1000); // shares → lots
@@ -269,7 +269,7 @@ export async function fetchAllStockPrices(yyyymmdd?: string): Promise<RawStockPr
       for (const row of priceTable.data as string[][]) {
         if (!row || row.length < 8) continue;
         const symbol = String(row[0]).trim();
-        if (!symbol || !/^\d{4,6}$/.test(symbol)) continue;
+        if (!symbol || !/^\d{4,6}[A-Z]?$/.test(symbol)) continue;
 
         const name_zh    = String(row[1] ?? '').trim();
         const close      = clean(row[2]);
