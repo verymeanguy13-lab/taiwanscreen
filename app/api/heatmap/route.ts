@@ -26,6 +26,7 @@ interface MarketSummary {
   down_count:   number;
   flat_count:   number;
   total_volume: number;
+  as_of_date:   string | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -77,12 +78,14 @@ export async function GET(req: NextRequest) {
       down_count:   string;
       flat_count:   string;
       total_volume: string;
+      as_of_date:   string | null;
     }>(
       `SELECT
          COUNT(*) FILTER (WHERE dp.change_pct > 0)  AS up_count,
          COUNT(*) FILTER (WHERE dp.change_pct < 0)  AS down_count,
          COUNT(*) FILTER (WHERE dp.change_pct = 0)  AS flat_count,
-         SUM(dp.volume)                              AS total_volume
+         SUM(dp.volume)                              AS total_volume,
+         MAX(dp.date)::text                          AS as_of_date
        FROM stocks s
        JOIN daily_prices dp
          ON s.symbol = dp.symbol
@@ -98,6 +101,7 @@ export async function GET(req: NextRequest) {
       down_count:   parseInt(raw?.down_count   ?? '0', 10),
       flat_count:   parseInt(raw?.flat_count   ?? '0', 10),
       total_volume: parseInt(raw?.total_volume ?? '0', 10),
+      as_of_date:   raw?.as_of_date ?? null,
     };
 
     // ── 3. Group by sector ───────────────────────────────────────────────────
@@ -137,7 +141,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('[heatmap] error:', err);
     return NextResponse.json({
-      marketSummary: { up_count: 0, down_count: 0, flat_count: 0, total_volume: 0 },
+      marketSummary: { up_count: 0, down_count: 0, flat_count: 0, total_volume: 0, as_of_date: null },
       sectors: [],
     });
   }

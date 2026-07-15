@@ -50,7 +50,7 @@ const BREAKOUT_CONFIG: Record<string, { color: string; bg: string }> = {
 
 function LiveMarketBar() {
   const { data, error } = useSWR('/api/heatmap', fetcher, {
-    refreshInterval: 0, shouldRetryOnError: false,
+    refreshInterval: 60000, shouldRetryOnError: false,
   });
 
   const summary = data?.marketSummary ?? data?.data?.marketSummary;
@@ -71,14 +71,21 @@ function LiveMarketBar() {
   ];
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 py-2 text-sm"
+    <div className="flex flex-col items-center gap-1 py-2 text-sm"
       style={{ backgroundColor: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
-      {items.map(({ label, value, color }, i) => (
-        <span key={i} className="flex items-center gap-1">
-          <span style={{ color: 'var(--text-secondary)' }}>{label}:</span>
-          <span className="font-semibold tabular-nums" style={{ color }}>{value}</span>
+      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
+        {items.map(({ label, value, color }, i) => (
+          <span key={i} className="flex items-center gap-1">
+            <span style={{ color: 'var(--text-secondary)' }}>{label}:</span>
+            <span className="font-semibold tabular-nums" style={{ color }}>{value}</span>
+          </span>
+        ))}
+      </div>
+      {summary.as_of_date && (
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          資料更新於 {summary.as_of_date} 收盤
         </span>
-      ))}
+      )}
     </div>
   );
 }
