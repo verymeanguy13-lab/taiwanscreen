@@ -159,6 +159,8 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
           scaleMargins: { top: 0.1, bottom: 0.3 },
         },
         timeScale: { borderColor: GRID_COLOR, timeVisible: true, secondsVisible: false },
+        handleScroll: { mouseWheel: false, pressedMouseMove: true },
+        handleScale:  { mouseWheel: false, pinch: true, axisPressedMouseMove: true },
       });
       chartRef.current = chart;
 
