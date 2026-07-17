@@ -474,6 +474,6 @@ const marginByDateCheck = await queryUnsafe(
     symbol2637PriceCheck, globalMaxDateCheck,
     universeCheck, stocksWithNoPriceEver,
     tpexFullMarketCheck,
-    liveMarginFetchCheck,
+    liveMarginFetchCheck, marginByDateCheck,
   });
 }
