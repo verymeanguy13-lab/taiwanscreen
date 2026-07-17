@@ -230,6 +230,16 @@ export async function ingestMarginData(date: string): Promise<IngestResult> {
     return { count: 0, errors: ['[ingestMarginData] No records fetched from TWSE'] };
   }
 
+  const validSymbolRows = await queryUnsafe<{ symbol: string }>(
+    `SELECT symbol FROM stocks`,
+    [],
+  );
+  const validSymbols = new Set(validSymbolRows.map(r => r.symbol));
+  const skipped = records.filter(m => !validSymbols.has(m.symbol));
+  if (skipped.length > 0) {
+    console.log(`[ingestMarginData] Skipping ${skipped.length} symbols not in stocks table`);
+  }
+
   const symbols: string[] = [];
   const balances: number[] = [];
   const changes: number[] = [];
@@ -237,7 +247,7 @@ export async function ingestMarginData(date: string): Promise<IngestResult> {
   const shortChanges: number[] = [];
   const ratios: number[] = [];
 
-  for (const m of records) {
+  for (const m of records.filter(m => validSymbols.has(m.symbol))) {
     const margin_ratio =
       m.margin_balance + m.short_balance > 0
         ? (m.margin_balance / (m.margin_balance + m.short_balance)) * 100
