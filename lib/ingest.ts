@@ -281,7 +281,7 @@ export async function ingestMarginData(date: string): Promise<IngestResult> {
              margin_ratio   = EXCLUDED.margin_ratio`,
       [symbols, balances, changes, shortBalances, shortChanges, ratios, date],
     );
-    count = records.length;
+    count = symbols.length;
   } catch (err) {
     const msg = `[ingestMarginData] Batch insert failed: ${err}`;
     console.error(msg);
