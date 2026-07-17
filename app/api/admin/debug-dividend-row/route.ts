@@ -423,6 +423,18 @@ export async function POST(req: NextRequest) {
      ORDER BY s.market`,
     [],
   );
+  
+  const marginChangeDistribution = await queryUnsafe(
+  `SELECT
+     MIN(margin_change) AS min_change,
+     MAX(margin_change) AS max_change,
+     COUNT(*) FILTER (WHERE margin_change = 0)::int AS exactly_zero_count,
+     COUNT(*) FILTER (WHERE margin_change IS NULL)::int AS null_count,
+     COUNT(*)::int AS total_rows
+   FROM margin_data
+   WHERE date = (SELECT MAX(date) FROM margin_data)`,
+  [],
+);
 
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
@@ -441,5 +453,6 @@ export async function POST(req: NextRequest) {
     symbol2637PriceCheck, globalMaxDateCheck,
     universeCheck, stocksWithNoPriceEver,
     tpexFullMarketCheck,
+    marginChangeDistribution,
   });
 }
