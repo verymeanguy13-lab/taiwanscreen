@@ -440,6 +440,23 @@ try {
   liveMarginFetchCheck = { error: String(err) };
 }
 
+// NEW (Session 84): margin_data by date, to pinpoint exactly which date the
+// all-zero margin_change pattern started on.
+const marginByDateCheck = await queryUnsafe(
+  `SELECT
+     date,
+     COUNT(*)::int AS total_rows,
+     COUNT(*) FILTER (WHERE margin_change = 0)::int AS zero_change_count,
+     COUNT(*) FILTER (WHERE margin_change != 0)::int AS nonzero_change_count,
+     MIN(margin_change) AS min_change,
+     MAX(margin_change) AS max_change
+   FROM margin_data
+   GROUP BY date
+   ORDER BY date DESC
+   LIMIT 15`,
+  [],
+);
+
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
     sectorCheck, dividendFreqCheck, stabilityScoreCheck,
