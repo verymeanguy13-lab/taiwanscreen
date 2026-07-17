@@ -49,7 +49,6 @@ export async function ingestStockList(): Promise<IngestResult> {
 export async function ingestDailyPrices(date: string): Promise<IngestResult> {
   console.log(`[ingestDailyPrices] Fetching prices for ${date}…`);
   const errors: string[] = [];
-  let count = 0;
 
   const prices = await fetchAllStockPrices();
   console.log(`[ingestDailyPrices] Fetched ${prices.length} price records.`);
@@ -66,28 +65,63 @@ export async function ingestDailyPrices(date: string): Promise<IngestResult> {
     return { count: 0, errors: [] };
   }
 
-  for (const p of prices) {
-    try {
-      await queryUnsafe(
-        `INSERT INTO daily_prices
-           (symbol, date, open, high, low, close, volume, change_amt, change_pct)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (symbol, date) DO UPDATE
-           SET open       = EXCLUDED.open,
-               high       = EXCLUDED.high,
-               low        = EXCLUDED.low,
-               close      = EXCLUDED.close,
-               volume     = EXCLUDED.volume,
-               change_amt = EXCLUDED.change_amt,
-               change_pct = EXCLUDED.change_pct`,
-        [p.symbol, date, p.open, p.high, p.low, p.close, p.volume, p.change_amt, p.change_pct],
-      );
-      count++;
-    } catch (err) {
-      const msg = `[ingestDailyPrices] Failed to upsert ${p.symbol}: ${err}`;
-      console.error(msg);
-      errors.push(msg);
-    }
+  if (prices.length === 0) {
+    return { count: 0, errors: ['[ingestDailyPrices] No records fetched'] };
+  }
+
+  const validSymbolRows = await queryUnsafe<{ symbol: string }>(`SELECT symbol FROM stocks`, []);
+  const validSymbols = new Set(validSymbolRows.map(r => r.symbol));
+  const validPrices = prices.filter(p => validSymbols.has(p.symbol));
+  const skippedCount = prices.length - validPrices.length;
+  if (skippedCount > 0) {
+    console.log(`[ingestDailyPrices] Skipping ${skippedCount} symbols not in stocks table`);
+  }
+
+  const symbols: string[] = [];
+  const opens: (number | null)[] = [];
+  const highs: (number | null)[] = [];
+  const lows: (number | null)[] = [];
+  const closes: (number | null)[] = [];
+  const volumes: (number | null)[] = [];
+  const changeAmts: (number | null)[] = [];
+  const changePcts: (number | null)[] = [];
+
+  for (const p of validPrices) {
+    symbols.push(p.symbol);
+    opens.push(p.open ?? null);
+    highs.push(p.high ?? null);
+    lows.push(p.low ?? null);
+    closes.push(p.close ?? null);
+    volumes.push(p.volume ?? null);
+    changeAmts.push(p.change_amt ?? null);
+    changePcts.push(p.change_pct ?? null);
+  }
+
+  let count = 0;
+  try {
+    await queryUnsafe(
+      `INSERT INTO daily_prices
+         (symbol, date, open, high, low, close, volume, change_amt, change_pct)
+       SELECT t.symbol, $9::date, t.open, t.high, t.low, t.close, t.volume, t.change_amt, t.change_pct
+       FROM UNNEST(
+         $1::text[], $2::numeric[], $3::numeric[], $4::numeric[],
+         $5::numeric[], $6::bigint[], $7::numeric[], $8::numeric[]
+       ) AS t(symbol, open, high, low, close, volume, change_amt, change_pct)
+       ON CONFLICT (symbol, date) DO UPDATE
+         SET open       = EXCLUDED.open,
+             high       = EXCLUDED.high,
+             low        = EXCLUDED.low,
+             close      = EXCLUDED.close,
+             volume     = EXCLUDED.volume,
+             change_amt = EXCLUDED.change_amt,
+             change_pct = EXCLUDED.change_pct`,
+      [symbols, opens, highs, lows, closes, volumes, changeAmts, changePcts, date],
+    );
+    count = symbols.length;
+  } catch (err) {
+    const msg = `[ingestDailyPrices] Batch insert failed: ${err}`;
+    console.error(msg);
+    errors.push(msg);
   }
 
   console.log(`[ingestDailyPrices] Done. Upserted ${count} rows, ${errors.length} errors.`);
