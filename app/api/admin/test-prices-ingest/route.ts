@@ -1,6 +1,6 @@
 // app/api/admin/test-prices-ingest/route.ts
 // TEMPORARY — isolated test for the batched ingestDailyPrices rewrite.
-// Writes to a throwaway fake date so it doesn't touch real data.
+// Defaults to a throwaway fake date; pass ?date=YYYY-MM-DD to target a real date.
 // Delete once the fix is confirmed and folded into the daily cron.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,24 +17,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const date = req.nextUrl.searchParams.get('date') ?? TEST_DATE;
+
   const start = Date.now();
-  const result = await ingestDailyPrices(TEST_DATE);
+  const result = await ingestDailyPrices(date);
   const elapsedMs = Date.now() - start;
 
-  return NextResponse.json({ testDate: TEST_DATE, elapsedMs, ...result });
+  return NextResponse.json({ date, elapsedMs, ...result });
 }
 
-// Call this with DELETE to clean up the test data afterward
+// Call this with DELETE to clean up rows for a given date (defaults to the fake test date)
 export async function DELETE(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret');
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const date = req.nextUrl.searchParams.get('date') ?? TEST_DATE;
+
   const deleted = await queryUnsafe(
     `DELETE FROM daily_prices WHERE date = $1 RETURNING symbol`,
-    [TEST_DATE],
+    [date],
   );
 
-  return NextResponse.json({ deletedRows: deleted.length });
+  return NextResponse.json({ date, deletedRows: deleted.length });
 }
