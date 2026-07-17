@@ -131,57 +131,93 @@ export async function ingestDailyPrices(date: string): Promise<IngestResult> {
 export async function ingestInstitutionalFlows(date: string): Promise<IngestResult> {
   console.log(`[ingestInstitutionalFlows] Fetching institutional flows for ${date}…`);
   const errors: string[] = [];
-  let count = 0;
 
   const flows = await fetchInstitutionalFlows(date.replace(/-/g, ''));
   console.log(`[ingestInstitutionalFlows] Fetched ${flows.length} records.`);
 
-  for (const f of flows) {
-    try {
-      await queryUnsafe(
-        `INSERT INTO institutional_flows
-           (symbol, date,
-            foreign_buy, foreign_sell, foreign_net,
-            trust_buy, trust_sell, trust_net,
-            dealer_buy, dealer_sell, dealer_net,
-            total_net)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (symbol, date) DO UPDATE
-           SET foreign_buy  = EXCLUDED.foreign_buy,
-               foreign_sell = EXCLUDED.foreign_sell,
-               foreign_net  = EXCLUDED.foreign_net,
-               trust_buy    = EXCLUDED.trust_buy,
-               trust_sell   = EXCLUDED.trust_sell,
-               trust_net    = EXCLUDED.trust_net,
-               dealer_buy   = EXCLUDED.dealer_buy,
-               dealer_sell  = EXCLUDED.dealer_sell,
-               dealer_net   = EXCLUDED.dealer_net,
-               total_net    = EXCLUDED.total_net`,
-        [
-          f.symbol, date,
-          f.foreign_buy, f.foreign_sell, f.foreign_net,
-          f.trust_buy,   f.trust_sell,   f.trust_net,
-          f.dealer_buy,  f.dealer_sell,  f.dealer_net,
-          f.total_net,
-        ],
-      );
-      count++;
-    } catch (err) {
-      const msg = `[ingestInstitutionalFlows] Failed to upsert ${f.symbol}: ${err}`;
-      console.error(msg);
-      errors.push(msg);
-    }
+  if (flows.length === 0) {
+    return { count: 0, errors: [] };
   }
 
+  const validSymbolRows = await queryUnsafe<{ symbol: string }>(`SELECT symbol FROM stocks`, []);
+  const validSymbols = new Set(validSymbolRows.map(r => r.symbol));
+  const validFlows = flows.filter(f => validSymbols.has(f.symbol));
+  const skippedCount = flows.length - validFlows.length;
+  if (skippedCount > 0) {
+    console.log(`[ingestInstitutionalFlows] Skipping ${skippedCount} symbols not in stocks table`);
+  }
+
+  const symbols: string[] = [];
+  const foreignBuys: number[] = [];
+  const foreignSells: number[] = [];
+  const foreignNets: number[] = [];
+  const trustBuys: number[] = [];
+  const trustSells: number[] = [];
+  const trustNets: number[] = [];
+  const dealerBuys: number[] = [];
+  const dealerSells: number[] = [];
+  const dealerNets: number[] = [];
+  const totalNets: number[] = [];
+
+  for (const f of validFlows) {
+    symbols.push(f.symbol);
+    foreignBuys.push(f.foreign_buy);
+    foreignSells.push(f.foreign_sell);
+    foreignNets.push(f.foreign_net);
+    trustBuys.push(f.trust_buy);
+    trustSells.push(f.trust_sell);
+    trustNets.push(f.trust_net);
+    dealerBuys.push(f.dealer_buy);
+    dealerSells.push(f.dealer_sell);
+    dealerNets.push(f.dealer_net);
+    totalNets.push(f.total_net);
+  }
+
+  let count = 0;
   try {
-    await computeTripleBuy(date);
+    await queryUnsafe(
+      `INSERT INTO institutional_flows
+         (symbol, date,
+          foreign_buy, foreign_sell, foreign_net,
+          trust_buy, trust_sell, trust_net,
+          dealer_buy, dealer_sell, dealer_net,
+          total_net)
+       SELECT t.symbol, $12::date,
+              t.foreign_buy, t.foreign_sell, t.foreign_net,
+              t.trust_buy, t.trust_sell, t.trust_net,
+              t.dealer_buy, t.dealer_sell, t.dealer_net,
+              t.total_net
+       FROM UNNEST(
+         $1::text[], $2::numeric[], $3::numeric[], $4::numeric[],
+         $5::numeric[], $6::numeric[], $7::numeric[],
+         $8::numeric[], $9::numeric[], $10::numeric[], $11::numeric[]
+       ) AS t(symbol, foreign_buy, foreign_sell, foreign_net,
+              trust_buy, trust_sell, trust_net,
+              dealer_buy, dealer_sell, dealer_net, total_net)
+       ON CONFLICT (symbol, date) DO UPDATE
+         SET foreign_buy  = EXCLUDED.foreign_buy,
+             foreign_sell = EXCLUDED.foreign_sell,
+             foreign_net  = EXCLUDED.foreign_net,
+             trust_buy    = EXCLUDED.trust_buy,
+             trust_sell   = EXCLUDED.trust_sell,
+             trust_net    = EXCLUDED.trust_net,
+             dealer_buy   = EXCLUDED.dealer_buy,
+             dealer_sell  = EXCLUDED.dealer_sell,
+             dealer_net   = EXCLUDED.dealer_net,
+             total_net    = EXCLUDED.total_net`,
+      [
+        symbols, foreignBuys, foreignSells, foreignNets,
+        trustBuys, trustSells, trustNets,
+        dealerBuys, dealerSells, dealerNets, totalNets,
+        date,
+      ],
+    );
+    count = symbols.length;
   } catch (err) {
-    const msg = `[ingestInstitutionalFlows] Failed to compute triple_buy: ${err}`;
+    const msg = `[ingestInstitutionalFlows] Batch insert failed: ${err}`;
     console.error(msg);
     errors.push(msg);
   }
-
-  await computeConsecutiveDays(date);
 
   console.log(`[ingestInstitutionalFlows] Done. Upserted ${count} rows, ${errors.length} errors.`);
   return { count, errors };
