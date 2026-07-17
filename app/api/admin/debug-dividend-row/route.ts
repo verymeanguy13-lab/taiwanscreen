@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
+import { fetchMarginData } from '@/lib/twse';
 
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret');
@@ -424,17 +425,20 @@ export async function POST(req: NextRequest) {
     [],
   );
   
-  const marginChangeDistribution = await queryUnsafe(
-  `SELECT
-     MIN(margin_change) AS min_change,
-     MAX(margin_change) AS max_change,
-     COUNT(*) FILTER (WHERE margin_change = 0)::int AS exactly_zero_count,
-     COUNT(*) FILTER (WHERE margin_change IS NULL)::int AS null_count,
-     COUNT(*)::int AS total_rows
-   FROM margin_data
-   WHERE date = (SELECT MAX(date) FROM margin_data)`,
-  [],
-);
+  // NEW (Session 84): call the live margin-fetching function directly to see
+// what TWSE is actually returning right now, bypassing the database entirely.
+let liveMarginFetchCheck;
+try {
+  const liveRecords = await fetchMarginData();
+  liveMarginFetchCheck = {
+    total_records_fetched: liveRecords.length,
+    sample_first_5: liveRecords.slice(0, 5),
+    non_zero_balance_count: liveRecords.filter(r => r.margin_balance !== 0).length,
+    non_zero_change_count: liveRecords.filter(r => r.margin_change !== 0).length,
+  };
+} catch (err) {
+  liveMarginFetchCheck = { error: String(err) };
+}
 
   return NextResponse.json({
     roeCheck, growthCheck, positionCheck, scopeCheck, rawRows6901,
@@ -453,6 +457,6 @@ export async function POST(req: NextRequest) {
     symbol2637PriceCheck, globalMaxDateCheck,
     universeCheck, stocksWithNoPriceEver,
     tpexFullMarketCheck,
-    marginChangeDistribution,
+    liveMarginFetchCheck,
   });
 }
