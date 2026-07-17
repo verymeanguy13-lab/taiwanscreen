@@ -222,42 +222,60 @@ export async function computeConsecutiveDays(date: string): Promise<void> {
 export async function ingestMarginData(date: string): Promise<IngestResult> {
   console.log(`[ingestMarginData] Fetching margin data for ${date}…`);
   const errors: string[] = [];
-  let count = 0;
 
   const records = await fetchMarginData();
   console.log(`[ingestMarginData] Fetched ${records.length} records.`);
 
-  for (const m of records) {
-    try {
-      const margin_ratio =
-        m.margin_balance + m.short_balance > 0
-          ? (m.margin_balance / (m.margin_balance + m.short_balance)) * 100
-          : 0;
+  if (records.length === 0) {
+    return { count: 0, errors: ['[ingestMarginData] No records fetched from TWSE'] };
+  }
 
-      await queryUnsafe(
-        `INSERT INTO margin_data
-           (symbol, date, margin_balance, margin_change,
-            short_balance, short_change, margin_ratio)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (symbol, date) DO UPDATE
-           SET margin_balance = EXCLUDED.margin_balance,
-               margin_change  = EXCLUDED.margin_change,
-               short_balance  = EXCLUDED.short_balance,
-               short_change   = EXCLUDED.short_change,
-               margin_ratio   = EXCLUDED.margin_ratio`,
-        [
-          m.symbol, date,
-          m.margin_balance, m.margin_change,
-          m.short_balance,  m.short_change,
-          Math.round(margin_ratio * 100) / 100,
-        ],
-      );
-      count++;
-    } catch (err) {
-      const msg = `[ingestMarginData] Failed to upsert ${m.symbol}: ${err}`;
-      console.error(msg);
-      errors.push(msg);
-    }
+  const symbols: string[] = [];
+  const balances: number[] = [];
+  const changes: number[] = [];
+  const shortBalances: number[] = [];
+  const shortChanges: number[] = [];
+  const ratios: number[] = [];
+
+  for (const m of records) {
+    const margin_ratio =
+      m.margin_balance + m.short_balance > 0
+        ? (m.margin_balance / (m.margin_balance + m.short_balance)) * 100
+        : 0;
+
+    symbols.push(m.symbol);
+    balances.push(m.margin_balance);
+    changes.push(m.margin_change);
+    shortBalances.push(m.short_balance);
+    shortChanges.push(m.short_change);
+    ratios.push(Math.round(margin_ratio * 100) / 100);
+  }
+
+  let count = 0;
+  try {
+    await queryUnsafe(
+      `INSERT INTO margin_data
+         (symbol, date, margin_balance, margin_change,
+          short_balance, short_change, margin_ratio)
+       SELECT t.symbol, $7::date, t.margin_balance, t.margin_change,
+              t.short_balance, t.short_change, t.margin_ratio
+       FROM UNNEST(
+         $1::text[], $2::numeric[], $3::numeric[],
+         $4::numeric[], $5::numeric[], $6::numeric[]
+       ) AS t(symbol, margin_balance, margin_change, short_balance, short_change, margin_ratio)
+       ON CONFLICT (symbol, date) DO UPDATE
+         SET margin_balance = EXCLUDED.margin_balance,
+             margin_change  = EXCLUDED.margin_change,
+             short_balance  = EXCLUDED.short_balance,
+             short_change   = EXCLUDED.short_change,
+             margin_ratio   = EXCLUDED.margin_ratio`,
+      [symbols, balances, changes, shortBalances, shortChanges, ratios, date],
+    );
+    count = records.length;
+  } catch (err) {
+    const msg = `[ingestMarginData] Batch insert failed: ${err}`;
+    console.error(msg);
+    errors.push(msg);
   }
 
   console.log(`[ingestMarginData] Done. Upserted ${count} rows, ${errors.length} errors.`);
