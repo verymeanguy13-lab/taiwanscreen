@@ -17,42 +17,71 @@ export async function GET(
 
   try {
     const result = await cached(cacheKey, 60 * 60, async () => {
-      // ── Fetch last 4 reported periods ─────────────────────────────────────
-      // Used for profitability/growth calcs that need matched quarter-pairs.
-      // NOTE: previously filtered WHERE gross_margin IS NOT NULL, which
-      // silently discarded revenue/eps/net_margin too for any sector that
-      // doesn't report gross margin (banks, insurers, financial holding
-      // companies — gross margin isn't a meaningful concept for them).
+      // ── Fetch a wider window of reported periods ──────────────────────────
+      // Used for profitability/growth calcs. We need real year-over-year
+      // pairs (same quarter, one year apart) — not just "the two most recent
+      // rows", since the most recent 1-2 rows are often valuation-only
+      // snapshots (pe_ratio/pb_ratio updated daily before a quarter's actual
+      // eps/revenue have been reported). LIMIT 12 covers up to 3 years back,
+      // enough to find a same-quarter match even with occasional gaps.
       const fundRows = await queryUnsafe<{
+        period:       string;
         gross_margin: number | null;
         net_margin:   number | null;
         eps:          number | null;
         revenue:      number | null;
       }>(
-        `SELECT gross_margin, net_margin, eps, revenue
+        `SELECT period, gross_margin, net_margin, eps, revenue
          FROM fundamentals
          WHERE symbol = $1
          ORDER BY period DESC
-         LIMIT 4`,
+         LIMIT 12`,
         [symbol],
       );
 
-      const latestFund = fundRows[0] ?? {};
-      const prevFund   = fundRows[1] ?? {};
+      // Find true YoY pair for a given field: the most recent row that has
+      // that field populated, matched against the row exactly 1 year (same
+      // quarter) prior that also has it populated. Returns null if no clean
+      // same-quarter match exists in the fetched window.
+      function findYoYPair(field: 'revenue' | 'eps'): { latest: number; prior: number } | null {
+        const parsePeriod = (p: string) => {
+          const m = p.match(/^(\d{4})Q(\d)$/);
+          return m ? { year: Number(m[1]), quarter: Number(m[2]) } : null;
+        };
+        for (const row of fundRows) {
+          const val = row[field];
+          if (val == null) continue;
+          const parsed = parsePeriod(row.period);
+          if (!parsed) continue;
+          const priorPeriod = `${parsed.year - 1}Q${parsed.quarter}`;
+          const priorRow = fundRows.find(r => r.period === priorPeriod && r[field] != null);
+          if (priorRow) return { latest: Number(val), prior: Number(priorRow[field]) };
+        }
+        return null;
+      }
 
+      const revPair = findYoYPair('revenue');
       const revenueGrowth =
-        latestFund.revenue && prevFund.revenue && Number(prevFund.revenue) > 0
-          ? ((Number(latestFund.revenue) - Number(prevFund.revenue)) /
-              Number(prevFund.revenue)) *
-            100
+        revPair && revPair.prior > 0
+          ? ((revPair.latest - revPair.prior) / revPair.prior) * 100
           : null;
 
+      const epsPair = findYoYPair('eps');
       const epsGrowth =
-        latestFund.eps && prevFund.eps && Number(prevFund.eps) > 0
-          ? ((Number(latestFund.eps) - Number(prevFund.eps)) /
-              Number(prevFund.eps)) *
-            100
+        epsPair && epsPair.prior > 0
+          ? ((epsPair.latest - epsPair.prior) / epsPair.prior) * 100
           : null;
+
+      // Latest non-null gross/net margin (same "scan for newest populated
+      // value" pattern as pe_ratio/pb_ratio/roe/debt_ratio below) — the
+      // single most recent row may be a valuation-only snapshot without
+      // these fields.
+      let grossMargin: number | null = null;
+      let netMargin:   number | null = null;
+      for (const row of fundRows) {
+        if (grossMargin === null && row.gross_margin != null) grossMargin = Number(row.gross_margin);
+        if (netMargin   === null && row.net_margin   != null) netMargin   = Number(row.net_margin);
+      }
 
       // ── Latest non-null pe_ratio / pb_ratio / roe / debt_ratio ──────────
       // These previously were hardcoded to null here with a comment saying
@@ -129,8 +158,8 @@ export async function GET(
         debt_ratio: debtRatio,
         sector:     sector,
 
-        gross_margin:       latestFund.gross_margin ? Number(latestFund.gross_margin) : null,
-        net_margin:         latestFund.net_margin   ? Number(latestFund.net_margin)   : null,
+        gross_margin:       grossMargin,
+        net_margin:         netMargin,
         revenue_growth_yoy: revenueGrowth,
         eps_growth_yoy:     epsGrowth,
 
