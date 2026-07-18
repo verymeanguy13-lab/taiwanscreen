@@ -67,7 +67,12 @@ export function ShareholdersTab({ symbol }: { symbol: string }) {
         </h3>
 
         {directors.length === 0 ? (
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暫無資料</p>
+          <div>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暫無資料</p>
+            <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+              部分公司尚未於公開資訊觀測站（MOPS）公佈本季董監持股資料，屬資料來源限制。
+            </p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs" style={{ minWidth: 420 }}>

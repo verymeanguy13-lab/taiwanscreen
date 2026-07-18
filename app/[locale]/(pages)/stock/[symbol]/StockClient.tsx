@@ -67,7 +67,10 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
   const { data: klineData } = useSWR(
     activeTab === 'kline' ? `/api/kline/${symbol}` : null,
-    (url: string) => fetch(url).then(r => r.json()),
+    (url: string) => fetch(url).then(r => {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }),
     { revalidateOnFocus: false },
   );
 
@@ -350,6 +353,11 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
               {activeTab === 'supply' && (
                 <div className="flex flex-col gap-5">
+                  {supplyChain.as_parent.length === 0 && supplyChain.as_child.length === 0 && (
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      供應鏈圖目前僅涵蓋台積電、蘋果、輝達等生態系（約 39 檔相關個股），此股票尚未收錄在內。
+                    </p>
+                  )}
                   <div>
                     <h3 className="mb-3 text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
                       作為供應商（供貨給）
