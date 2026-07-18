@@ -625,9 +625,22 @@ export async function ingestFinancialStatements(
           ? Math.round(((latest.eps - prior.eps) / Math.abs(prior.eps)) * 10000) / 100
           : null;
 
+      // ── ROE: use trailing-twelve-month (TTM) net income, not one quarter ──
+      // A single quarter's netIncome/equity is ~1/4 of the annual return,
+      // but computeHealthScore's thresholds (≥20% excellent, ≥12% good,
+      // <5% poor) are calibrated for ANNUAL ROE. Comparing one quarter's
+      // return directly against those thresholds understated ROE for every
+      // stock on the site. FinMind's IncomeAfterTaxes is reported per
+      // discrete quarter (not cumulative YTD), so summing the last 4
+      // available quarters approximates trailing-12-month net income.
+      const last4 = quarters.slice(-4);
+      const ttmNetIncome = last4.every(q => q.netIncome != null)
+        ? last4.reduce((sum, q) => sum + q.netIncome!, 0)
+        : null;
+
       const roe =
-        latest.netIncome != null && latest.equity != null && latest.equity !== 0
-          ? Math.round((latest.netIncome / latest.equity) * 10000) / 100
+        ttmNetIncome != null && latest.equity != null && latest.equity !== 0
+          ? Math.round((ttmNetIncome / latest.equity) * 10000) / 100
           : null;
 
       // Derive fiscal quarter period from the latest report's own date
