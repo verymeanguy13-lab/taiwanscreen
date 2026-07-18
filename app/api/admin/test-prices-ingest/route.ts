@@ -34,12 +34,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const now = new Date();
-  const tw = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  const y = tw.getUTCFullYear();
-  const m = String(tw.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(tw.getUTCDate()).padStart(2, '0');
-  const dateStr = `${y}${m}${d}`;
+  const dateParam = req.nextUrl.searchParams.get('date');
+  let dateStr: string;
+  if (dateParam) {
+    dateStr = dateParam.replace(/-/g, '');
+  } else {
+    const now = new Date();
+    const tw = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const y = tw.getUTCFullYear();
+    const m = String(tw.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(tw.getUTCDate()).padStart(2, '0');
+    dateStr = `${y}${m}${d}`;
+  }
 
   const url = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${dateStr}&type=ALLBUT0999`;
 
