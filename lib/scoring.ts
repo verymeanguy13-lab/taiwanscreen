@@ -480,6 +480,7 @@ export interface HealthScoreInput {
   latest_yield_pct:         number | null;
   consecutive_years:        number | null;
   stability_score:          number | null;
+  sector?:                  string | null;
 }
 
 export interface HealthScoreResult {
@@ -541,8 +542,15 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   }
 
   // Safety (0–100)
+  // NOTE: debt_ratio is skipped for financial-sector stocks (banks, insurers,
+  // financial holding companies). Their liabilities are structurally ~85-95%+
+  // because customer deposits / policy reserves are booked as liabilities —
+  // that's normal, healthy banking, not a solvency warning. Applying the
+  // generic debt-ratio threshold here would incorrectly penalize the entire
+  // 金融保險 sector regardless of actual financial health.
+  const isFinancialSector = (input.sector ?? '').includes('金融');
   let safety = 0;
-  if (input.debt_ratio !== null) {
+  if (input.debt_ratio !== null && !isFinancialSector) {
     if (input.debt_ratio <= 30)      { safety += 40; strengths.push('負債比低(≤30%)'); }
     else if (input.debt_ratio <= 50) { safety += 25; }
     else if (input.debt_ratio > 70)  { warnings.push('負債比偏高'); }

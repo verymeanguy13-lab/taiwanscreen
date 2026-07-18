@@ -17,8 +17,12 @@ export async function GET(
 
   try {
     const result = await cached(cacheKey, 60 * 60, async () => {
-      // ── Fetch last 4 periods where gross_margin is populated ─────────────
+      // ── Fetch last 4 reported periods ─────────────────────────────────────
       // Used for profitability/growth calcs that need matched quarter-pairs.
+      // NOTE: previously filtered WHERE gross_margin IS NOT NULL, which
+      // silently discarded revenue/eps/net_margin too for any sector that
+      // doesn't report gross margin (banks, insurers, financial holding
+      // companies — gross margin isn't a meaningful concept for them).
       const fundRows = await queryUnsafe<{
         gross_margin: number | null;
         net_margin:   number | null;
@@ -28,7 +32,6 @@ export async function GET(
         `SELECT gross_margin, net_margin, eps, revenue
          FROM fundamentals
          WHERE symbol = $1
-         AND gross_margin IS NOT NULL
          ORDER BY period DESC
          LIMIT 4`,
         [symbol],
@@ -112,11 +115,19 @@ export async function GET(
       const flow = flowRows[0] ?? {};
       const div  = divRows[0]  ?? {};
 
+      // ── Fetch sector (needed for sector-aware safety scoring) ────────────
+      const sectorRows = await queryUnsafe<{ sector: string | null }>(
+        `SELECT sector FROM stocks WHERE symbol = $1`,
+        [symbol],
+      );
+      const sector = sectorRows[0]?.sector ?? null;
+
       return computeHealthScore({
         pe_ratio:   peRatio,
         pb_ratio:   pbRatio,
         roe:        roe,
         debt_ratio: debtRatio,
+        sector:     sector,
 
         gross_margin:       latestFund.gross_margin ? Number(latestFund.gross_margin) : null,
         net_margin:         latestFund.net_margin   ? Number(latestFund.net_margin)   : null,
