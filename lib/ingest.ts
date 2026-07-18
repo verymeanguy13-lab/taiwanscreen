@@ -50,7 +50,7 @@ export async function ingestDailyPrices(date: string): Promise<IngestResult> {
   console.log(`[ingestDailyPrices] Fetching prices for ${date}…`);
   const errors: string[] = [];
 
-  const prices = await fetchAllStockPrices();
+  const prices = await fetchAllStockPrices(date.replace(/-/g, ''));
   console.log(`[ingestDailyPrices] Fetched ${prices.length} price records.`);
 
   // Safety check — STOCK_DAY_ALL returns the latest trading day's data.
