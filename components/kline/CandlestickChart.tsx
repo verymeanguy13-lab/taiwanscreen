@@ -29,7 +29,7 @@ interface KlineData {
 type Timeframe = 'D' | 'W' | 'M';
 type SubPanel  = 'MACD' | 'RSI' | 'KDJ';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = (url: string) => fetch(url).then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }); 
 
 const MAIN_HEIGHT = 380;
 const SUB_HEIGHT  = 120;
@@ -173,9 +173,6 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         wickDownColor:   DOWN_COLOR,
       });
       candleSeries.setData(candles.map(c => ({
-        time: c.date as string, open: c.open, high: c.high, low: c.low, close: c.close,
-      })));
-candleSeries.setData(candles.map(c => ({
         time: c.date as string, open: c.open, high: c.high, low: c.low, close: c.close,
       })));
       chart.timeScale().fitContent();
@@ -381,9 +378,9 @@ candleSeries.setData(candles.map(c => ({
   }, [data, timeframe, subPanel]);
 
   if (isLoading) return <Skeleton style={{ height: MAIN_HEIGHT + SUB_HEIGHT + 80, borderRadius: 8 }} />;
-  if (error || !data) return (
+  if (error || !data || !data.candles) return (
     <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-      無法載入K線資料
+      {error?.message === '404' ? '此標的價格資料不足，暫無法產生K線分析' : '無法載入K線資料'}
     </div>
   );
 
