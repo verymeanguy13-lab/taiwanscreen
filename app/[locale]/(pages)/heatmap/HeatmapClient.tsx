@@ -11,6 +11,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 const MARKET_TABS = [
   { label: '全部',  value: 'all'  },
   { label: '上市',  value: 'TWSE' },
+  { label: '上櫃',  value: 'TPEx' },
 ];
 
 const SIZE_TABS = [
