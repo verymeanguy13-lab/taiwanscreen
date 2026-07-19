@@ -18,6 +18,7 @@ import {
   ingestDailyPrices,
   ingestInstitutionalFlows,
   ingestMarginData,
+  computeConsecutiveDays,
 } from '@/lib/ingest';
 export const maxDuration = 300; // Hobby default is 10s — this does multi-day backfill
                                   // + 4 sequential ingest steps, same reason cron/weekly needed this
@@ -242,6 +243,19 @@ export async function GET(req: NextRequest) {
       return { count: 0, errors: [msg] };
     }
   })();
+
+  // Consecutive buy/sell streaks (foreign_consecutive_days, trust_consecutive_days)
+  // are a DERIVED field — they must be recomputed after every day's raw
+  // institutional flow numbers are ingested, or they silently sit at their
+  // schema default (0) forever. This was previously only reachable via a
+  // manual admin endpoint, so every stock's streak was frozen at whatever
+  // that endpoint last computed — never reflecting new days at all.
+  try {
+    await computeConsecutiveDays(taiwanDate);
+  } catch (err) {
+    const msg = `computeConsecutiveDays fatal: ${err}`;
+    console.error(msg); allErrors.push(msg);
+  }
 
   const margin = await (async () => {
     try { return await ingestMarginData(taiwanDate); }
