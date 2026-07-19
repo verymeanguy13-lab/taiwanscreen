@@ -116,6 +116,33 @@ export async function GET(
         if (debtRatio === null && row.debt_ratio != null) debtRatio = Number(row.debt_ratio);
       }
 
+      // ── Fallback ROE when the FinMind-sourced roe column is null ─────────
+      // FinMind's financial-statements dataset structurally does not cover
+      // financial holding companies / banks / insurers (confirmed: ~30
+      // financial-sector symbols all fail identically) — no amount of
+      // retrying will ever populate `roe` for them via the normal pipeline.
+      // Approximate ROE instead from data we already reliably have:
+      //   book value per share = price / pb_ratio
+      //   ROE ≈ trailing-12-month EPS / book value per share × 100
+      // This needs a TTM eps sum, not a single quarter's — same reasoning
+      // as the true-YoY fix above (a single quarter is ~1/4 of the annual
+      // return and would understate ROE by ~4x if used directly).
+      if (roe === null && pbRatio != null && pbRatio > 0) {
+        const epsRows = fundRows.filter(r => r.eps != null).slice(0, 4);
+        if (epsRows.length === 4) {
+          const ttmEps = epsRows.reduce((sum, r) => sum + Number(r.eps), 0);
+          const priceRow = await queryUnsafe<{ close: number | null }>(
+            `SELECT close FROM daily_prices WHERE symbol = $1 ORDER BY date DESC LIMIT 1`,
+            [symbol],
+          );
+          const close = priceRow[0]?.close != null ? Number(priceRow[0].close) : null;
+          if (close != null && close > 0) {
+            const bookValuePerShare = close / pbRatio;
+            roe = Math.round((ttmEps / bookValuePerShare) * 10000) / 100;
+          }
+        }
+      }
+
       // ── Fetch latest institutional flows ─────────────────────────────────
       const flowRows = await queryUnsafe<{
         foreign_consecutive_days: number | null;

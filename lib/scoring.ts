@@ -502,11 +502,20 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const warnings:  string[] = [];
 
   // Profitability (0–100)
+  // NOTE: gross_margin/net_margin are manufacturing/retail concepts that
+  // don't apply to financial holding companies (banks, insurers) — they're
+  // structurally always null for that sector, worth 100 of the 170 possible
+  // raw points below. Without adjustment, even a flawless bank could never
+  // score above ROE(40)+PE(30)=70/100. When both margins are genuinely
+  // inapplicable (financial sector, both null), rescale so the achievable
+  // range still reaches 100.
   let profitability = 0;
   if (input.roe !== null) {
     if (input.roe >= 20)      { profitability += 40; strengths.push('ROE優異(≥20%)'); }
     else if (input.roe >= 12) { profitability += 25; }
-    else if (input.roe < 5)   { warnings.push('ROE偏低'); }
+    else if (input.roe >= 8)  { profitability += 15; }
+    else if (input.roe >= 5)  { profitability += 8; }
+    else                      { warnings.push('ROE偏低'); }
   }
   if (input.gross_margin !== null) {
     if (input.gross_margin >= 50)      { profitability += 50; strengths.push('毛利率高(≥50%)'); }
@@ -525,6 +534,11 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
     if (input.pe_ratio > 0 && input.pe_ratio <= 15)      { profitability += 30; strengths.push('本益比合理'); }
     else if (input.pe_ratio > 0 && input.pe_ratio <= 25) { profitability += 15; }
     else if (input.pe_ratio > 40)                        { warnings.push('本益比偏高'); }
+  }
+  const isFinancialForProfitability = (input.sector ?? '').includes('金融');
+  if (isFinancialForProfitability && input.gross_margin === null && input.net_margin === null) {
+    // Achievable max without margins: ROE(40) + PE(30) = 70. Rescale to 100.
+    profitability = Math.round(Math.min(profitability, 70) * (100 / 70));
   }
 
   // Growth (0–100)
