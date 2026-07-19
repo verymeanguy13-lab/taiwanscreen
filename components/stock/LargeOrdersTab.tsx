@@ -119,7 +119,7 @@ export default function LargeOrdersTab({ symbol }: Props) {
             onClick={() => setDays(d)}
             className={`rounded px-3 py-1 text-sm transition-colors ${
               days === d
-                ? 'bg-[var(--accent)] text-black font-semibold'
+                ? 'bg-[var(--accent-green)] text-black font-semibold'
                 : 'bg-white/5 text-gray-300 hover:bg-white/10'
             }`}
           >

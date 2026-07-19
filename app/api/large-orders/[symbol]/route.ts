@@ -21,8 +21,13 @@ export async function GET(
   );
 
   try {
-    // Today's date for single-day large orders display
-    const today = new Date().toISOString().slice(0, 10);
+    // Use Taiwan time, not server UTC time — a plain `new Date()` would
+    // return the wrong calendar date during Taiwan's early morning hours
+    // (Taiwan midnight = UTC 16:00 the previous day), same pattern used in
+    // app/api/cron/daily/route.ts.
+    const now = new Date();
+    const taiwanMs = now.getTime() + 8 * 60 * 60 * 1000;
+    const today = new Date(taiwanMs).toISOString().slice(0, 10);
 
     // Run both fetches in parallel
     const [largeOrders, consecutiveBuyers] = await Promise.all([
