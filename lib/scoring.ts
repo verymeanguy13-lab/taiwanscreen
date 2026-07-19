@@ -481,6 +481,7 @@ export interface HealthScoreInput {
   consecutive_years:        number | null;
   stability_score:          number | null;
   sector?:                  string | null;
+  flow_size_ratio?:         number | null;
 }
 
 export interface HealthScoreResult {
@@ -588,6 +589,16 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
     else if (d <= -1) { chips -= 10; }
   }
   if (input.triple_buy) { chips += 50; strengths.push('三大法人同步買超'); }
+
+  // Outsized single-day flow bonus — independent of streak length, so a
+  // massive one-day buy still stands out even when it's only day 1-2 of a
+  // fresh streak (which alone would score modestly under the tiers above).
+  if (input.flow_size_ratio != null) {
+    const r = input.flow_size_ratio;
+    if (r >= 8)      { chips += 20; strengths.push('外資單日爆量買超'); }
+    else if (r >= 4) { chips += 10; }
+  }
+
   chips = Math.max(0, Math.min(100, chips));
 
   // Weighted overall

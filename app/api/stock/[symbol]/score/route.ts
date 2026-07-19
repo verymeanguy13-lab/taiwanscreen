@@ -120,14 +120,38 @@ export async function GET(
       const flowRows = await queryUnsafe<{
         foreign_consecutive_days: number | null;
         triple_buy:               boolean;
+        foreign_net:              number | null;
       }>(
-        `SELECT foreign_consecutive_days, triple_buy
+        `SELECT foreign_consecutive_days, triple_buy, foreign_net
          FROM institutional_flows
          WHERE symbol = $1
          ORDER BY date DESC
          LIMIT 1`,
         [symbol],
       );
+
+      // ── Size-relative-to-normal ratio for today's flow ────────────────────
+      // Streak length alone treats a token 1-day uptick the same as a
+      // once-a-quarter mega buy, as long as both are "day 1". This compares
+      // today's |foreign_net| against the stock's own trailing 20-day
+      // average |foreign_net|, so an outsized single day still stands out
+      // even when it's not (yet) part of a long streak.
+      const recentFlowRows = await queryUnsafe<{ foreign_net: number | null }>(
+        `SELECT foreign_net FROM institutional_flows
+         WHERE symbol = $1
+         ORDER BY date DESC
+         LIMIT 20`,
+        [symbol],
+      );
+      let flowSizeRatio: number | null = null;
+      if (flowRows[0]?.foreign_net != null && recentFlowRows.length >= 5) {
+        const avgAbs =
+          recentFlowRows.reduce((sum, r) => sum + Math.abs(Number(r.foreign_net ?? 0)), 0) /
+          recentFlowRows.length;
+        if (avgAbs > 0) {
+          flowSizeRatio = Number(flowRows[0].foreign_net) / avgAbs;
+        }
+      }
 
       // ── Fetch dividend summary ────────────────────────────────────────────
       const divRows = await queryUnsafe<{
@@ -165,6 +189,7 @@ export async function GET(
 
         foreign_consecutive_days: flow.foreign_consecutive_days ? Number(flow.foreign_consecutive_days) : null,
         triple_buy:               flow.triple_buy ?? false,
+        flow_size_ratio:          flowSizeRatio,
         latest_yield_pct:         div.latest_yield_pct  ? Number(div.latest_yield_pct)  : null,
         consecutive_years:        div.consecutive_years ? Number(div.consecutive_years) : null,
         stability_score:          div.stability_score   ? Number(div.stability_score)   : null,
