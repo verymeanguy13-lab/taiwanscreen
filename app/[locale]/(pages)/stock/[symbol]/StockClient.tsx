@@ -122,7 +122,13 @@ export default function StockClient({ initialData }: { initialData?: any }) {
   const change = formatChange(displayQuote?.change_pct ?? 0);
 
   // Merge all periods — newest first, first non-null value for each field wins
-  const fund = fundamentals.reduce((acc, f) => ({
+  // fundamentals arrives newest-first (ORDER BY period DESC). Reduce over a
+  // REVERSED copy (oldest → newest) so that when multiple periods have the
+  // same field populated, the most recent one overwrites last and wins —
+  // otherwise an older quarter silently overwrote newer data for every
+  // field here (this previously made eps/roe/margins/etc. randomly stale
+  // by however many periods back the field was last populated).
+  const fund = [...fundamentals].reverse().reduce((acc, f) => ({
     ...acc,
     ...(f.roe          != null && { roe:          f.roe }),
     ...(f.market_cap   != null && { market_cap:   f.market_cap }),
