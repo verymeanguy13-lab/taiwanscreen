@@ -54,8 +54,15 @@ const n = (v: unknown) => Number(v ?? 0);
 
 function fmtNet(v: number | null | undefined): string {
   if (v == null) return '—';
-  const abs = Math.abs(v).toLocaleString('en-US');
-  return `${v >= 0 ? '+' : '-'}${abs} 張`;
+  // TWSE's T86 source reports foreign/trust/dealer net figures in raw
+  // shares (股), but this page's labels and every render call here say
+  // "張" (board lots, 1 張 = 1,000 shares) — the Taiwan-standard unit for
+  // institutional flow reporting. Convert so the displayed number matches
+  // its own label instead of showing shares under a 張 label (1000x too
+  // large — e.g. a real 60,000-lot day was showing as "59,977,392 張").
+  const lots = Math.round(v / 1000);
+  const abs = Math.abs(lots).toLocaleString('en-US');
+  return `${lots >= 0 ? '+' : '-'}${abs} 張`;
 }
 
 function NetCell({ v }: { v: number | null | undefined }) {

@@ -294,7 +294,7 @@ function CompareTable({ stocks }: { stocks: StockData[] }) {
     {
       title: '籌碼',
       rows: [
-        { label: '外資買超(張)',  key: 'foreign_net',              format: v => v != null ? v.toLocaleString() : '—' },
+        { label: '外資買超(張)',  key: 'foreign_net',              format: v => v != null ? Math.round(v / 1000).toLocaleString() : '—' },
         { label: '外資連買天數', key: 'foreign_consecutive_days',  format: v => v != null ? `${v}天` : '—' },
       ],
     },

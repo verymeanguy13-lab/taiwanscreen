@@ -159,7 +159,7 @@ export function ScreenerTable({ data, sortBy, sortDir, onSort }: ScreenerTablePr
                   }}
                 >
                   {row.foreign_net != null
-                    ? `${(row.foreign_net ?? 0) >= 0 ? '+' : ''}${fmtInt(row.foreign_net)}`
+                    ? `${(row.foreign_net ?? 0) >= 0 ? '+' : ''}${fmtInt(row.foreign_net / 1000)}`
                     : '—'}
                 </td>
                 {/* 投信 */}
@@ -170,7 +170,7 @@ export function ScreenerTable({ data, sortBy, sortDir, onSort }: ScreenerTablePr
                   }}
                 >
                   {row.trust_net != null
-                    ? `${(row.trust_net ?? 0) >= 0 ? '+' : ''}${fmtInt(row.trust_net)}`
+                    ? `${(row.trust_net ?? 0) >= 0 ? '+' : ''}${fmtInt(row.trust_net / 1000)}`
                     : '—'}
                 </td>
                 {/* 三買 */}

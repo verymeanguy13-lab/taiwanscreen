@@ -74,8 +74,11 @@ const fetcher = (url: string) =>
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtNet(n: number | null | undefined): string {
   if (n == null) return '—';
-  const abs = Math.abs(n).toLocaleString('en-US');
-  return n >= 0 ? `+${abs}` : `-${abs}`;
+  // Source data is raw shares (股); this page labels everything in 張
+  // (board lots, 1張 = 1,000 shares) — convert to match.
+  const lots = Math.round(n / 1000);
+  const abs = Math.abs(lots).toLocaleString('en-US');
+  return lots >= 0 ? `+${abs}` : `-${abs}`;
 }
 
 function netColor(n: number): string {
