@@ -565,9 +565,12 @@ export async function ingestMonthlyRevenue(): Promise<IngestResult> {
 // repeatedly (e.g. via a recurring cron-job.org job, same pattern as
 // update-signals) and it naturally works through the full ~1,100-stock list
 // over time without needing to track progress yourself. Note: ETFs and a few
-// other symbols will never have this data (FinMind has none for them) — they
-// get retried harmlessly on every call, which costs a wasted API call each
-// time but doesn't block progress on real stocks.
+// other symbols will never have this data (FinMind has none for them).
+// These are tracked in fundamentals_fetch_failures with a 6-hour cooldown so
+// they don't get re-picked on every single call — without this, a group of
+// permanently-failing symbols would dominate ORDER BY RANDOM() selection
+// once the "real" stocks are mostly done, causing batch after batch of
+// zero progress.
 // =============================================================================
 
 export async function ingestFinancialStatements(
@@ -582,6 +585,10 @@ export async function ingestFinancialStatements(
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals_fetch_failures ff
+         WHERE ff.symbol = s.symbol AND ff.failed_at > NOW() - INTERVAL '6 hours'
        )`,
     [],
   );
@@ -593,6 +600,10 @@ export async function ingestFinancialStatements(
        AND NOT EXISTS (
          SELECT 1 FROM fundamentals f
          WHERE f.symbol = s.symbol AND f.eps_growth_yoy IS NOT NULL
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM fundamentals_fetch_failures ff
+         WHERE ff.symbol = s.symbol AND ff.failed_at > NOW() - INTERVAL '6 hours'
        )
      ORDER BY RANDOM()
      LIMIT $1`,
@@ -606,6 +617,12 @@ export async function ingestFinancialStatements(
       const quarters = await fetchStockFinancials(symbol);
       if (quarters.length === 0) {
         errors.push(`No financial data returned for ${symbol}`);
+        await queryUnsafe(
+          `INSERT INTO fundamentals_fetch_failures (symbol, failed_at, reason)
+           VALUES ($1, NOW(), 'no data returned')
+           ON CONFLICT (symbol) DO UPDATE SET failed_at = NOW(), reason = 'no data returned'`,
+          [symbol],
+        );
         await sleep(150);
         continue;
       }
@@ -655,11 +672,18 @@ export async function ingestFinancialStatements(
                roe            = COALESCE($4, fundamentals.roe)`,
         [symbol, period, epsGrowth, roe],
       );
+      await queryUnsafe(`DELETE FROM fundamentals_fetch_failures WHERE symbol = $1`, [symbol]);
       count++;
     } catch (err) {
       const msg = `[ingestFinancialStatements] Failed for ${symbol}: ${err}`;
       console.error(msg);
       errors.push(msg);
+      await queryUnsafe(
+        `INSERT INTO fundamentals_fetch_failures (symbol, failed_at, reason)
+         VALUES ($1, NOW(), $2)
+         ON CONFLICT (symbol) DO UPDATE SET failed_at = NOW(), reason = $2`,
+        [symbol, String(err).slice(0, 200)],
+      );
     }
 
     // Pace requests to stay comfortably under FinMind's rate limit
