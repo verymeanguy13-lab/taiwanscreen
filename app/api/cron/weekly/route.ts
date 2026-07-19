@@ -62,23 +62,21 @@ export async function GET(req: NextRequest) {
       if (rows.length === 0) continue;
 
       // ── consecutive_years ────────────────────────────────────────────────
-      // FIX (Session 82): `dividends.year` is INT in the schema, but the Neon
-      // driver returns it here as a STRING at runtime (confirmed via direct
-      // query — same class of driver-vs-TypeScript-type surprise as the
-      // DATE-vs-string bugs found in Sessions 80–81, just for an INT column
-      // this time). The gap-check below compares yearsWithDividend[i] (a
-      // string) against yearsWithDividend[i-1] - 1 (a number produced by
-      // subtraction). `===` never coerces types, so that comparison was
-      // ALWAYS false, meaning consecutiveYears could only ever end up as 1
-      // for every single stock — which silently capped stability_score at a
-      // hard ceiling of 28 (monthly) / 18 (quarterly), far below the 80
-      // threshold the "配息穩定" preset requires, making it unreachable for
-      // any stock. Forcing Number(r.year) here fixes the comparison.
+      // FIX: `dividends.year` is stored in ROC/Minguo calendar format with a
+      // trailing Chinese suffix (e.g. '113年', not '2024') — Number('113年')
+      // returns NaN because the whole string must be numeric for Number() to
+      // parse it. Every row producing NaN meant JS Set (which treats NaN as
+      // equal to itself) collapsed the entire distinct-years list down to a
+      // single NaN entry, capping consecutiveYears at 1 for every stock on
+      // the site regardless of actual dividend history. parseInt stops at
+      // the first non-digit character instead of requiring the full string
+      // to be numeric, so it correctly extracts 113 from '113年'.
       const yearsWithDividend = [
         ...new Set(
           rows
             .filter(r => (r.cash_dividend ?? 0) > 0)
-            .map(r => Number(r.year)),
+            .map(r => parseInt(String(r.year), 10))
+            .filter(y => !Number.isNaN(y)),
         ),
       ].sort((a, b) => b - a);
 
