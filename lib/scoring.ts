@@ -571,13 +571,24 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   }
 
   // Chips (0–100)
+  // NOTE: previously only >=3-day streaks scored any points, and >=5-day
+  // streaks scored the same as a fresh 3-day streak once triple_buy was
+  // added — meaning most days (anything in the very common -2 to +2 range)
+  // scored a flat 0, and even a 3+ day SELL streak produced only a text
+  // warning with no actual point deduction. Graduated tiers below give
+  // proportional credit/penalty instead of an all-or-nothing cliff.
   let chips = 0;
   if (input.foreign_consecutive_days !== null) {
-    if (input.foreign_consecutive_days >= 5)      { chips += 50; strengths.push(`外資連買${input.foreign_consecutive_days}日`); }
-    else if (input.foreign_consecutive_days >= 3)  { chips += 30; }
-    else if (input.foreign_consecutive_days <= -3) { warnings.push('外資連賣'); }
+    const d = input.foreign_consecutive_days;
+    if (d >= 5)       { chips += 50; strengths.push(`外資連買${d}日`); }
+    else if (d >= 3)  { chips += 30; strengths.push(`外資連買${d}日`); }
+    else if (d >= 1)  { chips += 15; }
+    else if (d <= -5) { chips -= 30; warnings.push(`外資連賣${Math.abs(d)}日`); }
+    else if (d <= -3) { chips -= 20; warnings.push(`外資連賣${Math.abs(d)}日`); }
+    else if (d <= -1) { chips -= 10; }
   }
   if (input.triple_buy) { chips += 50; strengths.push('三大法人同步買超'); }
+  chips = Math.max(0, Math.min(100, chips));
 
   // Weighted overall
   const score = Math.round(
