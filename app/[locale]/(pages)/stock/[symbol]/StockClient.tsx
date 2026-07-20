@@ -22,7 +22,7 @@ import { ScoreCard }        from '@/components/kline/ScoreCard';
 import { BullBearPanel }    from '@/components/kline/BullBearPanel';
 import { ScoringPanel }     from '@/components/kline/ScoringPanel';
 import LargeOrdersTab       from '@/components/stock/LargeOrdersTab';
-
+import { ChipFlowPanel } from '@/components/stock/ChipFlowPanel';
 const fetcher = (url: string) =>
   fetch(url).then(r => {
     if (!r.ok) throw new Error(String(r.status));
@@ -239,8 +239,12 @@ export default function StockClient({ initialData }: { initialData?: any }) {
           {/* ── HEALTH SCORE ─────────────────────────────────────────── */}
           <HealthScore symbol={symbol} />
 
+          
           {/* ── PRICE CHART ──────────────────────────────────────────── */}
-          <PriceChart data={priceHistory as any} />
+<PriceChart data={priceHistory as any} />
+
+{/* ── CHIP FLOW ────────────────────────────────────────────── */}
+<ChipFlowPanel symbol={symbol} />
 
           {/* ── KEY METRICS ──────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
