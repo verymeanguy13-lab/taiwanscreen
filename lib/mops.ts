@@ -377,18 +377,36 @@ async function fetchDirectorHoldingsForMonth(
     month:     String(month).padStart(2, '0'),
   });
 
-  if (!raw) return [];
+  if (!raw) {
+    console.warn(`[fetchDirectorHoldings] No response body for ${symbol} ${rocYear}/${month} — mopsFetch returned null`);
+    return [];
+  }
 
   const html = extractHTML(raw);
   const rows = parseHTMLTable(html);
-  if (rows.length === 0) return [];
+
+  if (rows.length === 0) {
+    // Log a snippet of the raw response so we can see what MOPS actually
+    // sent back — an empty result page, a security banner, an error page, etc.
+    console.warn(
+      `[fetchDirectorHoldings] Zero table rows for ${symbol} ${rocYear}/${month}. ` +
+      `Raw response length=${raw.length}, first 300 chars: ${raw.slice(0, 300).replace(/\s+/g, ' ')}`
+    );
+    return [];
+  }
 
   // The real table has a merged, two-row header (main columns + a sub-header
   // for "配偶、未成年子女及利用他人名義持有部份"). Rather than trust fixed
   // column positions — which broke once already on this table — find the
   // header row by content, then locate 職稱/姓名/持股/比例 columns by text.
   const headerIdx = rows.findIndex(r => r.some(c => c.includes('職稱')) && r.some(c => c.includes('姓名')));
-  if (headerIdx === -1) return [];
+  if (headerIdx === -1) {
+    console.warn(
+      `[fetchDirectorHoldings] Got ${rows.length} rows for ${symbol} ${rocYear}/${month} but couldn't find a 職稱/姓名 header row. ` +
+      `First row cells: ${JSON.stringify(rows[0]?.slice(0, 8))}`
+    );
+    return [];
+  }
 
   const header = rows[headerIdx];
   const titleCol = header.findIndex(c => c.includes('職稱'));
@@ -398,7 +416,13 @@ async function fetchDirectorHoldingsForMonth(
   const sharesCol = header.findIndex((c, i) => i > nameCol && c.includes('持股') && !c.includes('比例'));
   const pctCol    = header.findIndex((c, i) => i > sharesCol && c.includes('比例'));
 
-  if (titleCol === -1 || nameCol === -1 || sharesCol === -1) return [];
+  if (titleCol === -1 || nameCol === -1 || sharesCol === -1) {
+    console.warn(
+      `[fetchDirectorHoldings] Found header row for ${symbol} ${rocYear}/${month} but missing a required column. ` +
+      `titleCol=${titleCol} nameCol=${nameCol} sharesCol=${sharesCol} pctCol=${pctCol}. Header cells: ${JSON.stringify(header)}`
+    );
+    return [];
+  }
 
   const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[] = [];
 
