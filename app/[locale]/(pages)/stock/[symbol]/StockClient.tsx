@@ -13,7 +13,6 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatChange, formatNTD } from '@/lib/utils';
 import type { StockDetailPayload } from '@/types';
-import { ShareholdersTab } from '@/components/ShareholdersTab';
 import { HealthScore } from '@/components/stock/HealthScore';
 import { PTTWidget } from '@/components/stock/PTTWidget';
 import WatchlistButton from '@/components/stock/WatchlistButton';
@@ -162,7 +161,10 @@ export default function StockClient({ initialData }: { initialData?: any }) {
     { label: '起漲評分', value: 'scoring'      },
     { label: '配息紀錄', value: 'dividends'    },
     { label: '供應鏈',   value: 'supply'       },
-    { label: '大股東',   value: 'shareholders' },
+    // 大股東 tab temporarily removed — MOPS blocks automated requests for
+    // 董監持股/大股東持股 data (confirmed: "因為安全性考量" security wall,
+    // not a code bug). Re-add once this is fed by a non-cloud data pipeline
+    // instead of a live Vercel-side fetch. See lib/mops.ts for details.
     { label: '大單追蹤', value: 'large-orders' },
   ];
 
@@ -437,10 +439,6 @@ export default function StockClient({ initialData }: { initialData?: any }) {
                 <div style={{ paddingTop: 8 }}>
                   <ScoringPanel symbol={symbol} />
                 </div>
-              )}
-
-              {activeTab === 'shareholders' && (
-                <ShareholdersTab symbol={symbol} />
               )}
 
               {activeTab === 'large-orders' && (
