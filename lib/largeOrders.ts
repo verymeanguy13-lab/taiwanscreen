@@ -1,229 +1,130 @@
 // =============================================================================
 // lib/largeOrders.ts
-// Fetch and parse large block trades (大單) from TWSE TWT38U endpoint.
-// A "large order" = any single broker transaction >= 100 lots in one day.
-// A "consecutive order" = same broker buying/selling the same stock 3+ days.
+// REBUILT — no longer scrapes TWSE TWT38U (that endpoint is a market-wide
+// foreign-buying table, not broker-level data — see Session 62 notes).
+//
+// Now reads from institutional_flows, which already has correct per-stock
+// foreign/trust/dealer net buy-sell figures and pre-computed streak columns.
+//
+// ASSUMPTION: lib/db.ts exports a Neon tagged-template client as `sql`
+// (standard @neondatabase/serverless pattern). Adjust the import below if
+// your actual db client differs.
 // =============================================================================
 
-export type LargeOrder = {
-  symbol:     string;
-  date:       string;   // YYYY-MM-DD
-  time?:      string;
-  price:      number;
-  volume:     number;   // in lots (張)
-  direction:  'BUY' | 'SELL';
-  brokerCode: string;
-  brokerName: string;
-  orderType:  'block' | 'consecutive' | 'single_lot';
+import { sql } from '@/lib/db';
+
+export type DailyFlow = {
+  symbol:                  string;
+  date:                    string;  // YYYY-MM-DD
+  foreignNet:              number;  // 張 (lots)
+  trustNet:                number;
+  dealerNet:               number;
+  totalNet:                number;
+  foreignConsecutiveDays:  number;
+  trustConsecutiveDays:    number;
+  tripleBuy:               boolean;
 };
 
-export type ConsecutiveBuyer = {
-  brokerCode:      string;
-  brokerName:      string;
-  direction:       'BUY' | 'SELL';
-  consecutiveDays: number;
-  totalVolume:     number;
-  avgPrice:        number;
+export type MarketRank = {
+  date:         string;
+  symbol:       string;
+  rank:         number;
+  totalStocks:  number;
+  foreignNet:   number;   // 張
+  percentile:   number;   // 0–100, higher = more foreign buying than peers
 };
 
-// ---------------------------------------------------------------------------
-// Internal: parse TWT38U response for a single date
-// Response fields (zero-indexed per TWSE spec):
-//   [0] 券商代號  [1] 券商名稱  [2] 買進股數  [3] 賣出股數  [4] 差異
-// ---------------------------------------------------------------------------
-interface TWT38URow {
-  brokerCode: string;
-  brokerName: string;
-  buyShares:  number;   // 買進股數 (股)
-  sellShares: number;   // 賣出股數 (股)
-}
+const SHARES_PER_LOT = 1_000;
 
-async function fetchTWT38UForDate(symbol: string, yyyyMMdd: string): Promise<TWT38URow[]> {
-  const url =
-    `https://www.twse.com.tw/rwd/zh/fund/TWT38U` +
-    `?stockNo=${encodeURIComponent(symbol)}&date=${yyyyMMdd}&response=json`;
-
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 TaiwanScreen/1.0' },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return [];
-
-  let json: { stat?: string; data?: string[][] } = {};
-  try { json = await res.json(); } catch { return []; }
-
-  if (json.stat !== 'OK' || !Array.isArray(json.data)) return [];
-
-  return json.data
-    .map((row) => {
-      // Strip commas from numbers
-      const clean = (v: string) => Number((v ?? '0').replace(/,/g, ''));
-      return {
-        brokerCode: row[0]?.trim() ?? '',
-        brokerName: row[1]?.trim() ?? '',
-        buyShares:  clean(row[2]),
-        sellShares: clean(row[3]),
-      };
-    })
-    .filter((r) => r.brokerCode !== '' && r.brokerCode !== '合計');
+function toLots(shares: number | string | null | undefined): number {
+  const n = Number(shares ?? 0);
+  return Math.round(n / SHARES_PER_LOT);
 }
 
 // ---------------------------------------------------------------------------
-// Convert shares → lots (1 lot = 1,000 shares)
+// fetchStockFlows — this stock's own daily foreign/trust/dealer net buy-sell
+// over the last N trading days present in the DB.
 // ---------------------------------------------------------------------------
-const sharesPerLot = 1_000;
-const largeOrderThreshold = 100; // lots
-
-// ---------------------------------------------------------------------------
-// fetchLargeOrders — get large block trades for a symbol on a given date
-// ---------------------------------------------------------------------------
-export async function fetchLargeOrders(
-  symbol: string,
-  date: string,   // YYYY-MM-DD
-): Promise<LargeOrder[]> {
-  const yyyyMMdd = date.replace(/-/g, '');
-  const rows = await fetchTWT38UForDate(symbol, yyyyMMdd);
-
-  const orders: LargeOrder[] = [];
-
-  for (const row of rows) {
-    const buyLots  = Math.floor(row.buyShares  / sharesPerLot);
-    const sellLots = Math.floor(row.sellShares / sharesPerLot);
-
-    if (buyLots >= largeOrderThreshold) {
-      orders.push({
-        symbol,
-        date,
-        price:      0,   // TWT38U doesn't include price; caller can enrich if needed
-        volume:     buyLots,
-        direction:  'BUY',
-        brokerCode: row.brokerCode,
-        brokerName: row.brokerName,
-        orderType:  'block',
-      });
-    }
-    if (sellLots >= largeOrderThreshold) {
-      orders.push({
-        symbol,
-        date,
-        price:      0,
-        volume:     sellLots,
-        direction:  'SELL',
-        brokerCode: row.brokerCode,
-        brokerName: row.brokerName,
-        orderType:  'block',
-      });
-    }
-  }
-
-  return orders.sort((a, b) => b.volume - a.volume);
-}
-
-// ---------------------------------------------------------------------------
-// getPastTradingDates — produce the last N calendar dates (excluding weekends)
-// We can't query TWSE for future/holidays reliably; caller may pass dates directly.
-// ---------------------------------------------------------------------------
-function getPastTradingDates(n: number): string[] {
-  const dates: string[] = [];
-  const d = new Date();
-  while (dates.length < n) {
-    d.setDate(d.getDate() - 1);
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue; // skip weekends
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  return dates; // newest first
-}
-
-// ---------------------------------------------------------------------------
-// detectConsecutiveBuyers — find brokers buying/selling 3+ consecutive days
-// ---------------------------------------------------------------------------
-export async function detectConsecutiveBuyers(
+export async function fetchStockFlows(
   symbol: string,
   days: number = 5,
-): Promise<ConsecutiveBuyer[]> {
-  const dates = getPastTradingDates(Math.min(days, 30));
+): Promise<DailyFlow[]> {
+  const limit = Math.min(Math.max(days, 1), 30);
 
-  // Fetch all dates in parallel (rate-limit: TWSE allows ~5 rps)
-  const perDateRows = await Promise.all(
-    dates.map(async (date) => {
-      const yyyyMMdd = date.replace(/-/g, '');
-      const rows = await fetchTWT38UForDate(symbol, yyyyMMdd);
-      return { date, rows };
-    }),
-  );
+  const rows = await sql`
+    SELECT
+      symbol,
+      date,
+      foreign_net,
+      trust_net,
+      dealer_net,
+      total_net,
+      foreign_consecutive_days,
+      trust_consecutive_days,
+      triple_buy
+    FROM institutional_flows
+    WHERE symbol = ${symbol}
+    ORDER BY date DESC
+    LIMIT ${limit}
+  `;
 
-  // Build per-broker timeline: { brokerCode → { date → { buy, sell } } }
-  type DayData = { buy: number; sell: number };
-  const timeline: Map<string, { name: string; days: Map<string, DayData> }> = new Map();
+  return (rows as any[]).map((r) => ({
+    symbol:                 r.symbol,
+    date:                   typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10),
+    foreignNet:             toLots(r.foreign_net),
+    trustNet:               toLots(r.trust_net),
+    dealerNet:              toLots(r.dealer_net),
+    totalNet:               toLots(r.total_net),
+    foreignConsecutiveDays: Number(r.foreign_consecutive_days ?? 0),
+    trustConsecutiveDays:   Number(r.trust_consecutive_days ?? 0),
+    tripleBuy:              Boolean(r.triple_buy),
+  }));
+}
 
-  for (const { date, rows } of perDateRows) {
-    for (const row of rows) {
-      if (!timeline.has(row.brokerCode)) {
-        timeline.set(row.brokerCode, { name: row.brokerName, days: new Map() });
-      }
-      timeline.get(row.brokerCode)!.days.set(date, {
-        buy:  Math.floor(row.buyShares  / sharesPerLot),
-        sell: Math.floor(row.sellShares / sharesPerLot),
-      });
-    }
-  }
+// ---------------------------------------------------------------------------
+// fetchMarketRank — where this stock ranks today (or its most recent trading
+// day in the DB) among ALL stocks by foreign net buying. Complements the
+// market-wide /institutional page rather than duplicating it.
+// ---------------------------------------------------------------------------
+export async function fetchMarketRank(symbol: string): Promise<MarketRank | null> {
+  // Most recent date this symbol has a row for.
+  const latest = await sql`
+    SELECT date
+    FROM institutional_flows
+    WHERE symbol = ${symbol}
+    ORDER BY date DESC
+    LIMIT 1
+  `;
 
-  const results: ConsecutiveBuyer[] = [];
-  const sortedDates = [...dates].sort(); // oldest first for streak counting
+  if ((latest as any[]).length === 0) return null;
 
-  for (const [brokerCode, { name, days }] of timeline) {
-    // Check BUY streak
-    let buyStreak = 0;
-    let buyVol = 0;
-    let buyPriceSum = 0; // price is 0 from TWT38U; placeholder
-    for (const date of sortedDates) {
-      const d = days.get(date);
-      if (d && d.buy >= largeOrderThreshold) {
-        buyStreak++;
-        buyVol += d.buy;
-      } else {
-        buyStreak = 0;
-        buyVol = 0;
-      }
-    }
+  const date = (latest as any[])[0].date;
 
-    // Check SELL streak
-    let sellStreak = 0;
-    let sellVol = 0;
-    for (const date of sortedDates) {
-      const d = days.get(date);
-      if (d && d.sell >= largeOrderThreshold) {
-        sellStreak++;
-        sellVol += d.sell;
-      } else {
-        sellStreak = 0;
-        sellVol = 0;
-      }
-    }
+  const ranked = await sql`
+    WITH ranked AS (
+      SELECT
+        symbol,
+        foreign_net,
+        RANK() OVER (ORDER BY foreign_net DESC) AS rank,
+        COUNT(*) OVER () AS total_stocks
+      FROM institutional_flows
+      WHERE date = ${date}
+    )
+    SELECT * FROM ranked WHERE symbol = ${symbol}
+  `;
 
-    if (buyStreak >= 3) {
-      results.push({
-        brokerCode,
-        brokerName:      name,
-        direction:       'BUY',
-        consecutiveDays: buyStreak,
-        totalVolume:     buyVol,
-        avgPrice:        0, // enrich from daily_prices if needed
-      });
-    }
-    if (sellStreak >= 3) {
-      results.push({
-        brokerCode,
-        brokerName:      name,
-        direction:       'SELL',
-        consecutiveDays: sellStreak,
-        totalVolume:     sellVol,
-        avgPrice:        0,
-      });
-    }
-  }
+  if ((ranked as any[]).length === 0) return null;
 
-  return results.sort((a, b) => b.consecutiveDays - a.consecutiveDays || b.totalVolume - a.totalVolume);
+  const r = (ranked as any[])[0];
+  const rank = Number(r.rank);
+  const total = Number(r.total_stocks);
+
+  return {
+    date:        typeof date === 'string' ? date : new Date(date).toISOString().slice(0, 10),
+    symbol,
+    rank,
+    totalStocks: total,
+    foreignNet:  toLots(r.foreign_net),
+    percentile:  total > 1 ? Math.round((1 - (rank - 1) / (total - 1)) * 100) : 100,
+  };
 }

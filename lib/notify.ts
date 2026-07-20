@@ -7,7 +7,18 @@
 
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Constructed lazily (inside sendAlertEmail), not at module load time.
+// A top-level `new Resend(...)` throws immediately if RESEND_API_KEY is
+// missing/placeholder, and Next.js hits that just from statically
+// collecting page data for any route that imports this file — failing
+// `next build` even though no email is ever actually sent during build.
+let resend: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resend) resend = new Resend(process.env.RESEND_API_KEY);
+  return resend;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -171,8 +182,14 @@ export async function sendAlertEmail(params: AlertEmailParams): Promise<boolean>
     stock_symbol,
   );
 
+  const client = getResendClient();
+  if (!client) {
+    console.warn(`[notify] RESEND_API_KEY not configured — skipping email to ${to} for ${stock_symbol}`);
+    return false;
+  }
+
   try {
-    const { error } = await resend.emails.send({
+    const { error } = await client.emails.send({
       from: 'onboarding@resend.dev',    // swap for your verified domain later
       to,
       subject,

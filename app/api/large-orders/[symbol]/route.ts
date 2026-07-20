@@ -1,12 +1,18 @@
 // =============================================================================
 // app/api/large-orders/[symbol]/route.ts
 // GET /api/large-orders/[symbol]?days=5
-// Returns large block trades + consecutive buyer analysis for a symbol.
-// Uses TWSE TWT38U (no CAPTCHA, no auth required).
+// Returns this stock's daily institutional net-flow history + its market-wide
+// foreign-buying rank for its most recent trading day on record.
+//
+// REBUILT — previously called live TWSE TWT38U (market-wide table, wrong data
+// shape for per-broker tracking). Now DB-backed via institutional_flows, so
+// no "today in Taiwan time" computation is needed here — we always read the
+// latest date actually present in the DB for that symbol, which sidesteps
+// the earlier UTC/Taiwan timezone bug entirely.
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchLargeOrders, detectConsecutiveBuyers } from '@/lib/largeOrders';
+import { fetchStockFlows, fetchMarketRank } from '@/lib/largeOrders';
 
 export async function GET(
   req: NextRequest,
@@ -21,22 +27,13 @@ export async function GET(
   );
 
   try {
-    // Use Taiwan time, not server UTC time — a plain `new Date()` would
-    // return the wrong calendar date during Taiwan's early morning hours
-    // (Taiwan midnight = UTC 16:00 the previous day), same pattern used in
-    // app/api/cron/daily/route.ts.
-    const now = new Date();
-    const taiwanMs = now.getTime() + 8 * 60 * 60 * 1000;
-    const today = new Date(taiwanMs).toISOString().slice(0, 10);
-
-    // Run both fetches in parallel
-    const [largeOrders, consecutiveBuyers] = await Promise.all([
-      fetchLargeOrders(symbol, today),
-      detectConsecutiveBuyers(symbol, days),
+    const [flows, rank] = await Promise.all([
+      fetchStockFlows(symbol, days),
+      fetchMarketRank(symbol),
     ]);
 
     return NextResponse.json(
-      { largeOrders, consecutiveBuyers },
+      { flows, rank },
       {
         headers: {
           'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
@@ -46,7 +43,7 @@ export async function GET(
   } catch (err) {
     console.error(`[large-orders] Error for ${symbol}:`, err);
     return NextResponse.json(
-      { largeOrders: [], consecutiveBuyers: [], error: 'Failed to fetch large orders' },
+      { flows: [], rank: null, error: 'Failed to fetch institutional flow data' },
       { status: 200 }, // graceful degradation — UI handles empty state
     );
   }
