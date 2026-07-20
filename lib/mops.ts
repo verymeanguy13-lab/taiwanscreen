@@ -14,16 +14,49 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// -----------------------------------------------------------------------------
+// Session cookie handling
+//
+// MOPS's ajax_* endpoints frequently reject cookie-less POST requests with a
+// silently empty/near-empty response (no HTTP error — just nothing useful in
+// the body). A plain browser session gets a cookie by visiting a parent page
+// first; we replicate that with one GET before the POST, cache the cookie for
+// the life of this server instance, and re-fetch it if a request comes back
+// empty (in case it expired).
+// -----------------------------------------------------------------------------
+let cachedCookie: string | null = null;
+
+async function getMopsCookie(forceRefresh = false): Promise<string | null> {
+  if (cachedCookie && !forceRefresh) return cachedCookie;
+
+  try {
+    const res = await fetch(`${BASE_URL}/mops/web/index`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TaiwanScreen/1.0)' },
+    });
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      // Keep just the cookie pairs, drop attributes like Path/HttpOnly/Expires
+      cachedCookie = setCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
+    }
+    return cachedCookie;
+  } catch (err) {
+    console.error('[mops] Failed to prime session cookie:', err);
+    return null;
+  }
+}
+
 /**
  * POST to MOPS with form-encoded body.
- * Retries once after 2 seconds on failure.
+ * Primes a session cookie first (required — see getMopsCookie above).
+ * Retries once after 2 seconds on failure, and once more with a fresh
+ * cookie if the response body comes back suspiciously empty.
  * Returns the raw response text, or null on failure.
  */
 async function mopsFetch(path: string, body: Record<string, string>): Promise<string | null> {
   const url = `${BASE_URL}${path}`;
   const formBody = new URLSearchParams(body).toString();
 
-  const attempt = async (): Promise<string | null> => {
+  const attempt = async (cookie: string | null): Promise<string | null> => {
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -32,6 +65,7 @@ async function mopsFetch(path: string, body: Record<string, string>): Promise<st
           'Accept': 'application/json, text/html, */*',
           // MOPS requires a referer or it may block the request
           'Referer': BASE_URL,
+          ...(cookie ? { Cookie: cookie } : {}),
         },
         body: formBody,
       });
@@ -48,14 +82,17 @@ async function mopsFetch(path: string, body: Record<string, string>): Promise<st
     }
   };
 
-  // First attempt
-  const first = await attempt();
-  if (first !== null) return first;
+  const cookie = await getMopsCookie();
 
-  // Retry after 2 seconds
-  console.warn(`[mopsFetch] Retrying ${path} after 2s…`);
+  // First attempt
+  const first = await attempt(cookie);
+  if (first !== null && first.trim().length > 0) return first;
+
+  // Retry after 2 seconds — could be a cold session cookie, so refresh it
+  console.warn(`[mopsFetch] Empty/failed response for ${path}, retrying with fresh cookie…`);
   await sleep(2000);
-  return attempt();
+  const freshCookie = await getMopsCookie(true);
+  return attempt(freshCookie);
 }
 
 // -----------------------------------------------------------------------------

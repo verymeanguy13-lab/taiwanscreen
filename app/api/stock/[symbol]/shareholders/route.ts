@@ -40,14 +40,30 @@ export async function GET(
 
       // ── 2. If DB is empty, fall back to live MOPS fetch ──────────────────
       if (rows.length === 0) {
-        const now     = new Date();
-        const year    = now.getFullYear();
-        const quarter = Math.ceil((now.getMonth() + 1) / 3);
+        // MOPS major-shareholder (10%+) disclosures lag behind the calendar
+        // quarter — they aren't published until well after a quarter ends.
+        // Asking for the CURRENT in-progress quarter (e.g. Q3 while July is
+        // happening) guarantees an empty result every time. Instead, ask for
+        // the most recently *completed* quarter, and if MOPS hasn't
+        // published that one yet either (common in the first few weeks
+        // after a quarter ends), fall back one quarter further.
+        const now = new Date();
+        const currentQuarter = Math.ceil((now.getMonth() + 1) / 3);
+        let year    = now.getFullYear();
+        let quarter = currentQuarter - 1;
+        if (quarter < 1) { quarter = 4; year -= 1; }
 
-        const [major, directors] = await Promise.all([
-          fetchMajorShareholders(symbol, year, quarter),
-          fetchDirectorHoldings(symbol),
-        ]);
+        const directorsPromise = fetchDirectorHoldings(symbol);
+        let major = await fetchMajorShareholders(symbol, year, quarter);
+
+        if (major.length === 0) {
+          let fallbackYear = year, fallbackQuarter = quarter - 1;
+          if (fallbackQuarter < 1) { fallbackQuarter = 4; fallbackYear -= 1; }
+          major = await fetchMajorShareholders(symbol, fallbackYear, fallbackQuarter);
+          if (major.length > 0) { year = fallbackYear; quarter = fallbackQuarter; }
+        }
+
+        const directors = await directorsPromise;
 
         const period = `${year}Q${quarter}`;
 
