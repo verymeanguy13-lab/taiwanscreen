@@ -297,6 +297,8 @@ export async function fetchMajorShareholders(
   try {
     const rocYear = toROCYear(year);
     const raw = await mopsFetch('/mops/web/ajax_t04st04', {
+      step:   '1',
+      firstin:'1',
       year:   String(rocYear),
       season: String(quarter),
       co_id:  symbol,
@@ -336,36 +338,98 @@ export async function fetchMajorShareholders(
 // 4. fetchDirectorHoldings
 // -----------------------------------------------------------------------------
 
+/**
+ * Compute a ROC year/month N months back from today.
+ * MOPS director-holdings data (stapap1) is published MONTHLY, not
+ * quarterly, and typically isn't available for a given month until
+ * partway through the following month.
+ */
+function getROCYearMonth(monthsAgo: number): { rocYear: number; month: number } {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
+  return { rocYear: toROCYear(d.getFullYear()), month: d.getMonth() + 1 };
+}
+
+async function fetchDirectorHoldingsForMonth(
+  symbol: string,
+  rocYear: number,
+  month: number,
+): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[]> {
+  // Endpoint corrected from the previous (wrong/defunct) ajax_t09se03 to the
+  // actual page MOPS serves 董監事持股明細 from — confirmed against a working
+  // reference implementation, not guessed. Full param set is required;
+  // MOPS ignores/blank-responds to partial payloads on this endpoint.
+  const raw = await mopsFetch('/mops/web/ajax_stapap1', {
+    encodeURIComponent: '1',
+    step:      '1',
+    firstin:   '1',
+    off:       '1',
+    keyword4:  '',
+    code1:     '',
+    TYPEK2:    '',
+    checkbtn:  '',
+    queryName: 'co_id',
+    inpuType:  'co_id',
+    TYPEK:     'all',
+    isnew:     'false',
+    co_id:     symbol,
+    year:      String(rocYear),
+    month:     String(month).padStart(2, '0'),
+  });
+
+  if (!raw) return [];
+
+  const html = extractHTML(raw);
+  const rows = parseHTMLTable(html);
+  if (rows.length === 0) return [];
+
+  // The real table has a merged, two-row header (main columns + a sub-header
+  // for "配偶、未成年子女及利用他人名義持有部份"). Rather than trust fixed
+  // column positions — which broke once already on this table — find the
+  // header row by content, then locate 職稱/姓名/持股/比例 columns by text.
+  const headerIdx = rows.findIndex(r => r.some(c => c.includes('職稱')) && r.some(c => c.includes('姓名')));
+  if (headerIdx === -1) return [];
+
+  const header = rows[headerIdx];
+  const titleCol = header.findIndex(c => c.includes('職稱'));
+  const nameCol  = header.findIndex(c => c.includes('姓名'));
+  // "目前持股" section: first 持股 column after the name column, and the
+  // 比例 (percentage) column immediately following it.
+  const sharesCol = header.findIndex((c, i) => i > nameCol && c.includes('持股') && !c.includes('比例'));
+  const pctCol    = header.findIndex((c, i) => i > sharesCol && c.includes('比例'));
+
+  if (titleCol === -1 || nameCol === -1 || sharesCol === -1) return [];
+
+  const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[] = [];
+
+  for (const row of rows.slice(headerIdx + 1)) {
+    const holder_name = row[nameCol]?.trim();
+    // Skip repeated header rows and blank rows
+    if (!holder_name || holder_name === '姓名' || holder_name === '職稱' || holder_name === '') continue;
+
+    const raw_type    = row[titleCol]?.trim() ?? '';
+    const holder_type = raw_type.includes('監') ? 'supervisor' : 'director';
+    const shares_held = parseInt((row[sharesCol] ?? '0').replace(/,/g, ''), 10) || 0;
+    const holding_pct = pctCol > -1 ? parseFloat((row[pctCol] ?? '0').replace(/,/g, '')) || 0 : 0;
+
+    results.push({ holder_name, holder_type, shares_held, holding_pct, change_shares: 0 });
+  }
+
+  return results;
+}
+
 export async function fetchDirectorHoldings(
   symbol: string,
 ): Promise<{ holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[]> {
   try {
-    const raw = await mopsFetch('/mops/web/ajax_t09se03', {
-      co_id: symbol,
-      TYPEK: 'sii',
-    });
-
-    if (!raw) return [];
-
-    const html = extractHTML(raw);
-    const rows = parseHTMLTable(html);
-
-    const results: { holder_name: string; holder_type: string; shares_held: number; holding_pct: number; change_shares: number }[] = [];
-
-    for (const row of rows) {
-      const holder_name = row[0]?.trim();
-      if (!holder_name || holder_name === '姓名' || holder_name === '職稱') continue;
-
-      const raw_type      = row[1]?.trim() ?? '';
-      const holder_type   = raw_type.includes('監') ? 'supervisor' : 'director';
-      const shares_held   = parseInt((row[2] ?? '0').replace(/,/g, ''), 10) || 0;
-      const holding_pct   = parseFloat((row[3] ?? '0').replace(/,/g, '')) || 0;
-      const change_shares = parseInt((row[4] ?? '0').replace(/,/g, ''), 10) || 0;
-
-      results.push({ holder_name, holder_type, shares_held, holding_pct, change_shares });
+    // Try last month first, then the month before, since MOPS publishes
+    // monthly data with a lag and last month's may not be posted yet.
+    for (const monthsAgo of [1, 2, 3]) {
+      const { rocYear, month } = getROCYearMonth(monthsAgo);
+      const results = await fetchDirectorHoldingsForMonth(symbol, rocYear, month);
+      if (results.length > 0) return results;
     }
-
-    return results;
+    return [];
   } catch (err) {
     console.error('[fetchDirectorHoldings] Unexpected error:', err);
     return [];
