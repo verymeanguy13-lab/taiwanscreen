@@ -54,6 +54,18 @@ export function ScannerResultsTable({ mode, side }: Props) {
   const raw: any[] = data?.results ?? [];
   const totalScanned: number = data?.totalScanned ?? 0;
 
+  // Signals come from a once-daily cron scan, not a live recalculation —
+  // this can legitimately be up to one trading day old (e.g. checked in the
+  // morning before today's scan has run). Surface the actual date so it
+  // reads as "as of [date]" rather than implying it's true right now.
+  const formatSignalDate = (iso: string | null | undefined): string => {
+    if (!iso) return '';
+    const d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const signalDateLabel = formatSignalDate(data?.date);
+
   // For scanner mode, apply type filter
   let filtered = [...raw];
   if (mode === 'scanner' && typeFilter !== '全部') {
@@ -75,7 +87,7 @@ export function ScannerResultsTable({ mode, side }: Props) {
   });
 
   const summaryText = mode === 'scanner'
-    ? `共掃描 ${totalScanned} 檔，找到 ${filtered.length} 個起漲訊號`
+    ? `共掃描 ${totalScanned} 檔，找到 ${filtered.length} 個起漲訊號${signalDateLabel ? `（資料截至 ${signalDateLabel} 收盤）` : ''}`
     : `今日${side === 'bull' ? '多方' : '空方'}名單共 ${filtered.length} 檔`;
 
   return (
