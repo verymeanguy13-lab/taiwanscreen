@@ -110,6 +110,14 @@ export async function getIntradayChipFlow(symbol: string): Promise<ChipFlowSnaps
       BIG_PLAYER_PERCENTILE,
     );
 
+    // DIAGNOSTIC — remove once the classification is confirmed working.
+    // 0% big-player is only mathematically possible with < MIN_BUCKETS_FOR_CLASSIFICATION
+    // real minute-buckets, so this tells us directly whether that's the case.
+    console.warn(
+      `[chipFlow] ${symbol}: ${minutes.length} buckets, threshold=${volumeThreshold}, ` +
+      `volumes=${JSON.stringify(minutes.map(m => m.totalVolume))}`
+    );
+
     const snapshots: ChipFlowSnapshot[] = [];
     let cumulativeBigPlayer = 0;
     let cumulativeRetail    = 0;
