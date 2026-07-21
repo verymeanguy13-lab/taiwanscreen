@@ -114,11 +114,30 @@ export async function getFugleTicks(symbol: string): Promise<IntradayTick[]> {
         ? isoTime.split('T')[1].substring(0, 8)
         : isoTime.substring(0, 8);
 
-      const rawVol = (t.volume as number) ?? 0;
+      // Fugle's trade objects use `size` for per-trade quantity, not
+      // `volume` (that name is reserved for cumulative day volume on other
+      // endpoints). This previously read the wrong field and silently
+      // defaulted to 0 for every single tick.
+      const rawVol = (t.size as number) ?? (t.volume as number) ?? 0;
 
-      const rawSide = (t.side as string) ?? 'U';
-      const side: 'B' | 'S' | 'U' =
-        rawSide === 'B' ? 'B' : rawSide === 'S' ? 'S' : 'U';
+      // Fugle does NOT send an explicit buy/sell flag on trade records —
+      // only `bid`/`ask` (best bid/ask at the time of the trade) alongside
+      // `price`. Classify the aggressor side ourselves using the standard
+      // tick/quote rule: trade at or above the ask = buy-initiated, at or
+      // below the bid = sell-initiated, otherwise unknown.
+      const bid = t.bid as number | undefined;
+      const ask = t.ask as number | undefined;
+      const price = (t.price as number) ?? 0;
+
+      let side: 'B' | 'S' | 'U' = 'U';
+      if (typeof t.side === 'string' && (t.side === 'B' || t.side === 'S')) {
+        // If a future Fugle response DOES include an explicit side, prefer it.
+        side = t.side;
+      } else if (typeof ask === 'number' && price >= ask) {
+        side = 'B';
+      } else if (typeof bid === 'number' && price <= bid) {
+        side = 'S';
+      }
 
       return {
         time:   timePart,
