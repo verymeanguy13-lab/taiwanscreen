@@ -81,6 +81,15 @@ const TEXT_COLOR = '#8B8FA8';
 const UP_COLOR   = '#FF4D6D';
 const DOWN_COLOR = '#00D4AA';
 
+// Mirrors BreakoutBadge.tsx's TYPE_CONFIG — kept local here rather than
+// exported/shared since it's only three small display constants and this
+// avoids touching an already-solid, working component.
+const LEGEND_CONFIG = {
+  '上漲趨勢突破': { color: '#3D8EF8', label: '上升趨勢突破' },
+  '箱型整理突破': { color: '#F5B700', label: '箱型突破'     },
+  '下跌V轉突破':  { color: '#FF4D6D', label: 'V轉反彈'      },
+} as const;
+
 export function CandlestickChart({ symbol }: { symbol: string }) {
   const { data, isLoading, error } = useSWR<KlineData>(
     `/api/kline/${symbol}`, fetcher, { revalidateOnFocus: false },
@@ -448,6 +457,30 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         </div>
         <div ref={subRef} style={{ width: '100%', height: SUB_HEIGHT }} />
       </div>
+
+      {/* ── Breakout legend — only types present in the current data ────────── */}
+      {timeframe === 'D' && data.breakouts.length > 0 && (() => {
+        const presentTypes = Array.from(new Set(data.breakouts.map(b => b.type)));
+        return (
+          <div
+            style={{
+              display: 'flex', flexWrap: 'wrap', gap: 14,
+              padding: '8px 12px', borderTop: `1px solid ${GRID_COLOR}`,
+              fontSize: 11, color: TEXT_COLOR,
+            }}
+          >
+            {presentTypes.map(type => {
+              const cfg = LEGEND_CONFIG[type];
+              return (
+                <span key={type} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ color: cfg.color, fontWeight: 700 }}>⬆</span>
+                  {cfg.label}
+                </span>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
 }
