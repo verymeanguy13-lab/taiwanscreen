@@ -147,9 +147,23 @@ export async function getMultiTimeframeData(symbol: string): Promise<TimeframeDa
 
     if (priceRows.length < 20) return [];
 
+    // queryUnsafe returns Postgres DATE columns as native JS Date objects at
+    // runtime, regardless of the declared `date: string` type above — that
+    // type is a compile-time label only, not enforced. The existing kline
+    // route never notices this because it never manipulates the value
+    // directly; it just hands it to NextResponse.json(), which auto-converts
+    // Date objects to ISO strings during serialization. This code does its
+    // own date math (aggregateWeekly/Monthly) BEFORE any such serialization,
+    // so it needs a real string up front or `.toISOString()` etc. crash with
+    // "RangeError: Invalid time value" on the resulting garbage.
+    const toDateStr = (d: unknown): string => {
+      if (d instanceof Date) return d.toISOString().slice(0, 10);
+      return String(d).slice(0, 10);
+    };
+
     const dailyCandles: Candle[] = priceRows.map(r => ({
       open: Number(r.open), high: Number(r.high), low: Number(r.low),
-      close: Number(r.close), volume: Number(r.volume), date: r.date,
+      close: Number(r.close), volume: Number(r.volume), date: toDateStr(r.date),
     }));
 
     const weeklyCandles  = aggregateWeekly(dailyCandles);
