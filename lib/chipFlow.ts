@@ -39,14 +39,24 @@ export type ChipFlowSummary = {
   signal:              'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell';
 };
 
-const ROLLING_WINDOW   = 5;   // minutes
-// Tuned down from an initial 2x guess to 1.5x after live testing on both a
-// mega-cap (2330, low volume-of-day variance) and a volatile mid-cap (3661)
-// showed 2x essentially never fires — 主力 stayed at 0 all session on both.
-// 1.5x is more forgiving while still requiring a genuine above-normal
-// minute, not just noise. Worth revisiting after watching a few more days
-// of real data if it now fires TOO often instead.
-const SPIKE_MULTIPLIER = 1.5;
+// BIG_PLAYER_PERCENTILE: top X% of a session's minutes, ranked by volume,
+// are classified "big player." 0.75 = top quartile (75th percentile cutoff).
+// Self-calibrating per session — no fixed absolute or ratio threshold that
+// can silently never fire, which is what happened with the previous
+// fixed-multiplier approach (tried 2x, then 1.5x, both fired essentially
+// never across two very different stocks in live testing).
+const BIG_PLAYER_PERCENTILE = 0.75;
+
+// Don't attempt classification on a near-empty session — needs enough
+// buckets for "top quartile" to mean anything.
+const MIN_BUCKETS_FOR_CLASSIFICATION = 8;
+
+function getPercentileThreshold(values: number[], percentile: number): number {
+  if (values.length === 0) return Infinity;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * percentile));
+  return sorted[idx];
+}
 
 interface MinuteBucket {
   time:        string;  // HH:MM
@@ -87,22 +97,26 @@ export async function getIntradayChipFlow(symbol: string): Promise<ChipFlowSnaps
 
     const minutes = bucketTicksByMinute(ticks);
 
+    // Self-calibrating classification: flag the top quartile of minutes BY
+    // VOLUME (relative to this session's own range) as "big player" minutes,
+    // rest as "retail". Replaces an earlier fixed-multiplier-vs-rolling-avg
+    // approach (tried 2x, then 1.5x) that turned out to essentially never
+    // fire — net signed FLOW can swing a lot minute to minute even when raw
+    // total VOLUME per minute stays fairly consistent, so no fixed ratio
+    // reliably separated the two. A percentile split always produces a
+    // sensible division regardless of how "spiky" a given day's data is.
+    const volumeThreshold = getPercentileThreshold(
+      minutes.map(m => m.totalVolume),
+      BIG_PLAYER_PERCENTILE,
+    );
+
     const snapshots: ChipFlowSnapshot[] = [];
     let cumulativeBigPlayer = 0;
     let cumulativeRetail    = 0;
 
-    for (let i = 0; i < minutes.length; i++) {
-      const bucket = minutes[i];
-
-      // Rolling 5-min average volume from the minutes BEFORE this one
-      // (falls back to however many preceding minutes exist near the open).
-      const windowStart = Math.max(0, i - ROLLING_WINDOW);
-      const priorWindow  = minutes.slice(windowStart, i);
-      const rollingAvg   = priorWindow.length > 0
-        ? priorWindow.reduce((sum, m) => sum + m.totalVolume, 0) / priorWindow.length
-        : bucket.totalVolume; // first minute: no prior data, treat as baseline (not a spike)
-
-      const isBigPlayerMinute = priorWindow.length > 0 && bucket.totalVolume > rollingAvg * SPIKE_MULTIPLIER;
+    for (const bucket of minutes) {
+      const isBigPlayerMinute = minutes.length >= MIN_BUCKETS_FOR_CLASSIFICATION
+        && bucket.totalVolume >= volumeThreshold;
 
       const bigPlayerFlow = isBigPlayerMinute ? bucket.netSigned : 0;
       const retailFlow    = isBigPlayerMinute ? 0 : bucket.netSigned;
