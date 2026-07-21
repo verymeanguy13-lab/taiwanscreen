@@ -40,7 +40,13 @@ export type ChipFlowSummary = {
 };
 
 const ROLLING_WINDOW   = 5;   // minutes
-const SPIKE_MULTIPLIER = 2;   // >2x rolling avg volume = big-player minute
+// Tuned down from an initial 2x guess to 1.5x after live testing on both a
+// mega-cap (2330, low volume-of-day variance) and a volatile mid-cap (3661)
+// showed 2x essentially never fires — 主力 stayed at 0 all session on both.
+// 1.5x is more forgiving while still requiring a genuine above-normal
+// minute, not just noise. Worth revisiting after watching a few more days
+// of real data if it now fires TOO often instead.
+const SPIKE_MULTIPLIER = 1.5;
 
 interface MinuteBucket {
   time:        string;  // HH:MM
