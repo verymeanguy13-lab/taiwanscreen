@@ -1,5 +1,5 @@
 'use client';
-
+import { MultiTimeframeChart } from '@/components/kline/MultiTimeframeChart';
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -456,6 +456,9 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
             </div>
           </Card>
+
+          {/* ── MULTI-TIMEFRAME VIEW ─────────────────────────────────── */}
+          <MultiTimeframeChart symbol={symbol} />
         </div>
 
         {/* ── RIGHT: sidebar ad — desktop only ────────────────────────── */}

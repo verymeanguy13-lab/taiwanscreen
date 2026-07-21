@@ -90,7 +90,16 @@ const LEGEND_CONFIG = {
   '下跌V轉突破':  { color: '#FF4D6D', label: 'V轉反彈'      },
 } as const;
 
-export function CandlestickChart({ symbol }: { symbol: string }) {
+export function CandlestickChart({
+  symbol,
+  extraLevels,
+}: {
+  symbol: string;
+  // Optional support/resistance levels from another timeframe (e.g. weekly
+  // levels shown on the daily chart) — Session 65's multi-timeframe view.
+  // Purely additive: omitting this prop leaves existing behavior unchanged.
+  extraLevels?: { price: number; type: 'support' | 'resistance' }[];
+}) {
   const { data, isLoading, error } = useSWR<KlineData>(
     `/api/kline/${symbol}`, fetcher, { revalidateOnFocus: false },
   );
@@ -257,6 +266,20 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
         }
       }
 
+      // ── Multi-timeframe support/resistance overlay (Session 65) ──────────
+      // Same LineSeries + span-full-range pattern as the box-breakout lines
+      // above, just sourced from another timeframe's key levels instead.
+      if (timeframe === 'D' && extraLevels && extraLevels.length > 0 && data.candles.length > 0) {
+        for (const lvl of extraLevels) {
+          const color = lvl.type === 'resistance' ? '#FF4D6D50' : '#00D4AA50';
+          chart.addSeries(LineSeries, { color, lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false })
+            .setData([
+              { time: data.candles[0].date as string, value: lvl.price },
+              { time: data.candles[data.candles.length - 1].date as string, value: lvl.price },
+            ]);
+        }
+      }
+
       chart.subscribeCrosshairMove((param) => {
         if (!param.time) { setCrosshairCandle(null); return; }
         const bar = param.seriesData?.get(candleSeries) as { open: number; high: number; low: number; close: number } | undefined;
@@ -384,7 +407,7 @@ export function CandlestickChart({ symbol }: { symbol: string }) {
       if (subChartRef.current) { (subChartRef.current as { remove: () => void }).remove(); subChartRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, timeframe, subPanel]);
+  }, [data, timeframe, subPanel, extraLevels]);
 
   if (isLoading) return <Skeleton style={{ height: MAIN_HEIGHT + SUB_HEIGHT + 80, borderRadius: 8 }} />;
   if (error || !data || !data.candles) return (
