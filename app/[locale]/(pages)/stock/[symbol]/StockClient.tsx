@@ -22,7 +22,6 @@ import { ScoreCard }        from '@/components/kline/ScoreCard';
 import { BullBearPanel }    from '@/components/kline/BullBearPanel';
 import { ScoringPanel }     from '@/components/kline/ScoringPanel';
 import LargeOrdersTab       from '@/components/stock/LargeOrdersTab';
-import { ChipFlowPanel } from '@/components/stock/ChipFlowPanel';
 const fetcher = (url: string) =>
   fetch(url).then(r => {
     if (!r.ok) throw new Error(String(r.status));
@@ -244,7 +243,13 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 <PriceChart data={priceHistory as any} />
 
 {/* ── CHIP FLOW ────────────────────────────────────────────── */}
-<ChipFlowPanel symbol={symbol} />
+{/* Removed — Fugle's intraday/trades endpoint only returns roughly the
+    most recent minute of trades, not a full session's worth (confirmed via
+    server logs: 37 minutes into a live session, only 1 minute-bucket of
+    data came back). No amount of classification-method tuning can fix a
+    feature built on a data source that can't supply the history it needs.
+    Underlying code (lib/chipFlow.ts, /api/chip-flow, ChipFlowPanel.tsx) is
+    left in place in case a full-session tick source becomes available. */}
 
           {/* ── KEY METRICS ──────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
