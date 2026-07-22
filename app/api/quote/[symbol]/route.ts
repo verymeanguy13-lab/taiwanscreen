@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryUnsafe } from '@/lib/db';
-import { isMarketOpen } from '@/lib/twseLive';
+import { isMarketOpen, getTaipeiNow } from '@/lib/twseLive';
 
 export async function GET(
   _req: NextRequest,
@@ -55,6 +55,46 @@ export async function GET(
         market,
         isLive:     false,
       });
+    }
+
+    // ── Past actual close (13:30) but before tonight's EOD cron (18:30):
+    // prefer daily_prices' settled row over TWSE's raw live tick, if it's
+    // already been populated for today. TWSE's MIS `z` field during this
+    // window can still reflect the last continuous-trading tick rather than
+    // the closing-auction's final settlement price — daily_prices, once
+    // populated, holds the authoritative settled close. Confirmed via a
+    // real ~10-point discrepancy on 2330 (site showed 2400, actual close
+    // was 2410) that self-corrected once this preferred the DB value.
+    const { date: taipeiToday, minuteOfDay } = getTaipeiNow();
+    if (minuteOfDay >= 810 && minuteOfDay < 1110) { // 13:30–18:30
+      const todayRow = await queryUnsafe<{
+        close: string; open: string; high: string; low: string;
+        volume: string; change_amt: string; change_pct: string;
+      }>(
+        `SELECT close, open, high, low, volume, change_amt, change_pct
+         FROM daily_prices
+         WHERE symbol = $1 AND date = $2`,
+        [symbol, taipeiToday],
+      );
+      if (todayRow[0]) {
+        const q = todayRow[0];
+        return NextResponse.json({
+          symbol,
+          close:      parseFloat(q.close),
+          open:       parseFloat(q.open),
+          high:       parseFloat(q.high),
+          low:        parseFloat(q.low),
+          volume:     parseFloat(q.volume),
+          change_amt: parseFloat(q.change_amt ?? '0'),
+          change_pct: parseFloat(q.change_pct ?? '0'),
+          prev_close: parseFloat(q.close),
+          name:       '',
+          time:       '13:30:00',
+          market,
+          isLive:     true,
+        });
+      }
+      // else: today's row not populated yet — fall through to raw MIS tick below
     }
 
     // ── Market open: fetch live price from TWSE ───────────────────────────
