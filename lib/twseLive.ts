@@ -13,10 +13,16 @@ export function inferExchange(symbol: string): 'tse' | 'otc' {
 }
 
 export function isMarketOpen(): boolean {
+  // Taiwan is UTC+8 year-round (no DST) — compute directly via millisecond
+  // offset rather than round-tripping through toLocaleString(), which
+  // depends on the runtime's ICU/locale data and has been an unreliable
+  // source of Taiwan-timezone bugs elsewhere in this codebase (see the
+  // large-orders route fix). Direct offset math has no such dependency.
   const now = new Date();
-  const taipei = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
-  const day = taipei.getDay();
-  const minuteOfDay = taipei.getHours() * 60 + taipei.getMinutes();
+  const taipeiMs = now.getTime() + 8 * 60 * 60 * 1000;
+  const taipei = new Date(taipeiMs);
+  const day = taipei.getUTCDay();
+  const minuteOfDay = taipei.getUTCHours() * 60 + taipei.getUTCMinutes();
   // Extended to 18:30 (1110 min) so TWSE MIS still serves final closing price
   // after market close (13:30) until our cron ingests EOD data at 18:30.
   return day >= 1 && day <= 5 && minuteOfDay >= 540 && minuteOfDay < 1110;
