@@ -16,7 +16,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { CandlestickChart } from './CandlestickChart';
 import type { TimeframeData, Trend } from '@/lib/multiTimeframe';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -127,8 +126,6 @@ export function MultiTimeframeChart({ symbol }: { symbol: string }) {
   const monthly = timeframes.find(t => t.timeframe === 'monthly');
   const bottom  = bottomTf === 'weekly' ? weekly : monthly;
 
-  const dailyExtraLevels = weekly?.keyLevels.map(l => ({ price: l.price, type: l.type })) ?? [];
-
   return (
     <div style={{ border: `1px solid ${BORDER}`, borderRadius: 8, overflow: 'hidden' }}>
       <button
@@ -138,17 +135,23 @@ export function MultiTimeframeChart({ symbol }: { symbol: string }) {
           padding: '10px 14px', backgroundColor: '#141720', border: 'none', cursor: 'pointer',
         }}
       >
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#F0F0F0' }}>多週期走勢</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#F0F0F0' }}>多週期走勢</span>
+          {daily && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: trendColor(daily.trend) }}>
+              日線{TREND_LABEL[daily.trend]}
+            </span>
+          )}
+        </span>
         <span style={{ color: NEUTRAL, fontSize: 12 }}>{expanded ? '收合 ▲' : '展開 ▼'}</span>
       </button>
 
       {expanded && (
         <div>
-          {/* ── Daily panel (60%) — reuses existing CandlestickChart ────── */}
-          <div style={{ position: 'relative' }}>
-            {daily && <TrendBadge label="日線" trend={daily.trend} />}
-            <CandlestickChart symbol={symbol} extraLevels={dailyExtraLevels} />
-          </div>
+          {/* Daily panel intentionally NOT rendered here — it already lives
+              on the 起漲分析 tab. This component now only contributes the
+              weekly/monthly companion view; weekly key levels are passed to
+              that existing daily chart directly from the stock page. */}
 
           {/* ── Weekly/Monthly panel (40%) ───────────────────────────────── */}
           <div style={{ borderTop: `1px solid ${BORDER}`, position: 'relative' }}>

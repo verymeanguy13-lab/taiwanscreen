@@ -72,6 +72,18 @@ export default function StockClient({ initialData }: { initialData?: any }) {
     { revalidateOnFocus: false },
   );
 
+  // Weekly support/resistance levels for the daily chart overlay — Session 65.
+  // Fetched separately from klineData (different route), only when the
+  // kline tab is active, same lazy pattern as klineData above.
+  const { data: mtfData } = useSWR(
+    activeTab === 'kline' ? `/api/multi-timeframe/${symbol}` : null,
+    (url: string) => fetch(url).then(r => r.json()),
+    { revalidateOnFocus: false },
+  );
+  const weeklyLevels = (mtfData?.data ?? [])
+    .find((t: any) => t.timeframe === 'weekly')
+    ?.keyLevels?.map((l: any) => ({ price: l.price, type: l.type })) ?? [];
+
   const { data: res, isLoading, error } = useSWR(
     symbol ? `/api/stock/${symbol}` : null,
     fetcher,
@@ -431,10 +443,13 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
               {activeTab === 'kline' && (
                 <div style={{ paddingTop: 8 }}>
-                  <CandlestickChart symbol={symbol} />
+                  <CandlestickChart symbol={symbol} extraLevels={weeklyLevels} />
                   {klineData?.score && (
                     <ScoreCard score={klineData.score} />
                   )}
+                  <div style={{ marginTop: 16 }}>
+                    <MultiTimeframeChart symbol={symbol} />
+                  </div>
                 </div>
               )}
 
@@ -456,9 +471,6 @@ export default function StockClient({ initialData }: { initialData?: any }) {
 
             </div>
           </Card>
-
-          {/* ── MULTI-TIMEFRAME VIEW ─────────────────────────────────── */}
-          <MultiTimeframeChart symbol={symbol} />
         </div>
 
         {/* ── RIGHT: sidebar ad — desktop only ────────────────────────── */}
