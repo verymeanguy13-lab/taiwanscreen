@@ -269,14 +269,24 @@ export function CandlestickChart({
       // ── Multi-timeframe support/resistance overlay (Session 65) ──────────
       // Same LineSeries + span-full-range pattern as the box-breakout lines
       // above, just sourced from another timeframe's key levels instead.
+      // Made deliberately more visible than a first pass (higher opacity,
+      // thicker, labeled) — a near-invisible reference line defeats the
+      // point of the feature.
       if (timeframe === 'D' && extraLevels && extraLevels.length > 0 && data.candles.length > 0) {
         for (const lvl of extraLevels) {
-          const color = lvl.type === 'resistance' ? '#FF4D6D50' : '#00D4AA50';
-          chart.addSeries(LineSeries, { color, lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false })
-            .setData([
-              { time: data.candles[0].date as string, value: lvl.price },
-              { time: data.candles[data.candles.length - 1].date as string, value: lvl.price },
-            ]);
+          const color = lvl.type === 'resistance' ? '#FF4D6D' : '#00D4AA';
+          const label = lvl.type === 'resistance' ? `週線壓力 ${lvl.price}` : `週線支撐 ${lvl.price}`;
+          chart.addSeries(LineSeries, {
+            color,
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: true,
+            lastValueVisible: true,
+            title: label,
+          }).setData([
+            { time: data.candles[0].date as string, value: lvl.price },
+            { time: data.candles[data.candles.length - 1].date as string, value: lvl.price },
+          ]);
         }
       }
 

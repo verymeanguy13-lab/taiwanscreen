@@ -86,12 +86,15 @@ function SimpleCandlePanel({ tf, height }: { tf: TimeframeData; height: number }
 
       // Same-style dashed key-level lines as the daily chart, for visual consistency
       for (const lvl of tf.keyLevels) {
-        const color = lvl.type === 'resistance' ? `${UP}50` : `${DOWN}50`;
-        c.addSeries(lc.LineSeries, { color, lineWidth: 1, lineStyle: lc.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false })
-          .setData([
-            { time: tf.candles[0].date as string, value: lvl.price },
-            { time: tf.candles[tf.candles.length - 1].date as string, value: lvl.price },
-          ]);
+        const color = lvl.type === 'resistance' ? UP : DOWN;
+        const label = lvl.type === 'resistance' ? `壓力 ${lvl.price}` : `支撐 ${lvl.price}`;
+        c.addSeries(lc.LineSeries, {
+          color, lineWidth: 2, lineStyle: lc.LineStyle.Dashed,
+          priceLineVisible: true, lastValueVisible: true, title: label,
+        }).setData([
+          { time: tf.candles[0].date as string, value: lvl.price },
+          { time: tf.candles[tf.candles.length - 1].date as string, value: lvl.price },
+        ]);
       }
 
       c.timeScale().fitContent();
