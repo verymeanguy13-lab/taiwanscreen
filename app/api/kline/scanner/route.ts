@@ -65,17 +65,6 @@ export async function GET(req: NextRequest) {
     );
     const totalScanned = totalRows[0]?.count ?? 0;
 
-    const SIGNAL_TO_BREAKOUT: Record<string, string> = {
-      '上漲趨勢突破': '上漲趨勢突破',
-      '箱型整理突破': '箱型整理突破',
-      '下跌V轉突破':  '下跌V轉突破',
-      '突破趨勢線':   '上漲趨勢突破',
-      '開布林':       '箱型整理突破',
-      '剛轉多':       '下跌V轉突破',
-      '昨日強勢股':   '上漲趨勢突破',
-      '近五日強勢股': '上漲趨勢突破',
-    };
-
     // Deduplicate: keep highest confidence signal per symbol
     const symbolMap = new Map<string, typeof rows[0]>();
     for (const row of rows) {
@@ -90,11 +79,19 @@ export async function GET(req: NextRequest) {
       filtered = filtered.filter(r => r.sector === industry);
     }
 
+    // breakoutType now shows the TRUE, raw signal_type — no more cosmetic
+    // remapping. The previous SIGNAL_TO_BREAKOUT table relabeled several
+    // different, looser momentum signals (開布林, 剛轉多, 昨日強勢股,
+    // 近五日強勢股, 突破趨勢線) as if they were one of the three strict
+    // detectAllBreakouts() categories. That made the rankings page disagree
+    // with the accuracy page, which correctly counts by the real stored
+    // type — a stock tagged 開布林 here would show 0 occurrences under
+    // 箱型整理突破 on /accuracy, since it was never actually that type.
     const results = filtered.map(r => ({
       symbol:        r.symbol,
       name_zh:       r.name_zh,
       sector:        r.sector,
-      breakoutType:  SIGNAL_TO_BREAKOUT[r.signal_type] ?? '上漲趨勢突破',
+      breakoutType:  r.signal_type,
       signalLabel:   r.signal_type,
       confidence:    Number(r.confidence) || 50,
       matrixScore:   Number(r.confidence) || 50,
