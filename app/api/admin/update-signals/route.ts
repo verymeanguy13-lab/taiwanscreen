@@ -101,9 +101,16 @@ export async function POST() {
       [10, 'price_10d', 'return_10d', 'price_up_10d'],
       [20, 'price_20d', 'return_20d', 'price_up_20d'],
     ] as [number, string, string, string][]) {
+      // targetDate is used ONLY as the eligibility filter (is this signal
+      // old enough that `days` trading days have definitely passed since it
+      // fired?) — NOT as the future-price lookup date. It was previously
+      // reused for both, which meant the "future" price could end up being
+      // fetched from at or near the signal's OWN entry date whenever
+      // targetDate landed close to signal_date — producing exactly 0.00%
+      // return for every signal, regardless of what the stock actually did.
       const targetDate = tradingDaysAgo(days);
-      const toUpdate = await queryUnsafe<{ id: number; symbol: string; entry_price: number }>(
-        `SELECT id, symbol, entry_price
+      const toUpdate = await queryUnsafe<{ id: number; symbol: string; entry_price: number; signal_date: string }>(
+        `SELECT id, symbol, entry_price, signal_date
          FROM signal_results
          WHERE signal_date <= $1 AND ${col} IS NULL
          LIMIT 200`,
@@ -112,11 +119,16 @@ export async function POST() {
 
       for (const row of toUpdate) {
         try {
+          // The Nth actual trading day AFTER this signal's own date — using
+          // daily_prices' own row order (via OFFSET) rather than
+          // reimplementing trading-day arithmetic, so weekends/holidays are
+          // handled correctly automatically.
           const priceRow = await queryUnsafe<{ close: number }>(
             `SELECT close FROM daily_prices
-             WHERE symbol = $1 AND date >= $2
-             ORDER BY date ASC LIMIT 1`,
-            [row.symbol, targetDate],
+             WHERE symbol = $1 AND date > $2
+             ORDER BY date ASC
+             OFFSET ${days - 1} LIMIT 1`,
+            [row.symbol, row.signal_date],
           );
           if (!priceRow[0]) continue;
           const futurePrice = priceRow[0].close;
