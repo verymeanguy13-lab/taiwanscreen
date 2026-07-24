@@ -138,7 +138,7 @@ function TripleBuyColumn() {
   const items = Array.isArray(res?.data) ? res.data : [];
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>🔥 三買訊號今日</h3>
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>🔥 三大法人同買今日</h3>
       {!res && !error ? <Skeleton rows={5} /> : error ? (
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>資料載入失敗</p>
       ) : items.length === 0 ? (

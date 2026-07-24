@@ -88,7 +88,7 @@ export function AccuracyDashboard() {
                 { label: '總訊號次數',        value: summary.totalSignals.toLocaleString(), color: 'var(--text-primary)' },
                 { label: '技術條件後上漲比例', value: `${summary.priceUpRate}%`,             color: statColor(summary.priceUpRate) },
                 { label: '平均報酬',          value: `${summary.avgReturn >= 0 ? '+' : ''}${summary.avgReturn}%`, color: summary.avgReturn >= 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
-                { label: '最佳訊號類型',      value: summary.bestSignalType,                color: 'var(--accent-gold)' },
+                { label: '歷史上漲比例最高型態', value: summary.bestSignalType,                color: 'var(--accent-gold)' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
@@ -97,6 +97,9 @@ export function AccuracyDashboard() {
               ))}
             </div>
             <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12 }}>
+              以上為歷史統計數據，不代表未來績效保證，不構成投資建議。
+            </p>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
               資料從 {summary.dataStartDate} 起，持續每日更新
             </p>
           </>

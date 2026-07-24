@@ -149,7 +149,7 @@ function FlowTable({
 const MAIN_TABS = [
   { label: '外資動向',   value: 'foreign'     },
   { label: '投信動向',   value: 'trust'       },
-  { label: '★ 三買訊號', value: 'triple'      },
+  { label: '★ 三大法人同買', value: 'triple'      },
   { label: '連續買超',   value: 'consecutive' },
 ];
 
@@ -384,7 +384,7 @@ export default function InstitutionalClient() {
               <div className="flex flex-col gap-4">
                 <div className="rounded-lg px-4 py-3 text-xs"
                   style={{ backgroundColor: 'rgba(61,142,248,0.08)', border: '1px solid rgba(61,142,248,0.2)', color: 'var(--accent-blue)' }}>
-                  💡 外資、投信、自營商同時呈現買超，為三方同步流入現象。三買訊號出現時，通常伴隨股價短期強勢表現。
+                  💡 外資、投信、自營商同時呈現買超，為三方同步流入現象。以上資料僅供參考，不構成投資建議，不代表個股未來走勢。
                 </div>
                 <FlowTable rows={tripleRes?.data ?? []} columns={tripleColumns} isLoading={tripleLoading} />
               </div>

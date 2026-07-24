@@ -123,7 +123,7 @@ export function HealthScore({ symbol }: { symbol: string }) {
                 border: '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)',
               }}
             >
-              ✓ {s}
+              {s}
             </span>
           ))}
         </div>
@@ -142,7 +142,7 @@ export function HealthScore({ symbol }: { symbol: string }) {
                 border: '1px solid color-mix(in srgb, var(--accent-gold) 30%, transparent)',
               }}
             >
-              ⚠ {w}
+              {w}
             </span>
           ))}
         </div>

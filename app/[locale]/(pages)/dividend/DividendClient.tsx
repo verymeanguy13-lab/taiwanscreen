@@ -128,7 +128,7 @@ export default function DividendClient() {
             台股高殖利率篩選
           </h1>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            找出最適合存股的標的，比較殖利率與配息穩定度
+            篩選高殖利率個股，比較殖利率與配息穩定度
           </p>
         </div>
 

@@ -112,7 +112,7 @@ export function BreakoutBadge({ signal, x, y }: BreakoutBadgeProps) {
             {/* Confidence */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                <span>突破信心度</span>
+                <span>突破強度</span>
                 <span style={{ color: cfg.color, fontWeight: 700 }}>{signal.confidence}%</span>
               </div>
               <div style={{ height: 6, background: '#1E2235', borderRadius: 3, overflow: 'hidden' }}>

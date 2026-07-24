@@ -47,7 +47,7 @@ function buildAlertDescription(
   const subjects: Record<string, string> = {
     price_above:        `[${name}] ${symbol} 股價突破 NT$${threshold}`,
     price_below:        `[${name}] ${symbol} 股價跌破 NT$${threshold}`,
-    triple_buy:         `[${name}] ${symbol} 出現三買訊號`,
+    triple_buy:         `[${name}] ${symbol} 出現三大法人同買`,
     foreign_buy_streak: `[${name}] ${symbol} 外資連續買超達 ${threshold} 日`,
     yield_above:        `[${name}] ${symbol} 殖利率達 ${threshold}%`,
   };
@@ -56,7 +56,7 @@ function buildAlertDescription(
   const conditions: Record<string, string> = {
     price_above:        `股價 NT$${fmt(current)} 已突破您設定的 NT$${threshold} 上限警示`,
     price_below:        `股價 NT$${fmt(current)} 已跌破您設定的 NT$${threshold} 下限警示`,
-    triple_buy:         `今日出現三買訊號（月均線、季均線、年均線同步向上排列）`,
+    triple_buy:         `今日出現三大法人同買（月均線、季均線、年均線同步向上排列）`,
     foreign_buy_streak: `外資已連續買超 ${current} 日，達到您設定的 ${threshold} 日門檻`,
     yield_above:        `殖利率 ${fmt(current)}% 已達到您設定的 ${threshold}% 門檻`,
   };

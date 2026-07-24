@@ -225,7 +225,7 @@ export function ScoringPanel({ symbol }: { symbol: string }) {
                       {b.type}
                     </span>
                     <span style={{ fontSize: 11, color: cfg.color, fontWeight: 700 }}>
-                      信心度 {b.confidence}%
+                      強度 {b.confidence}%
                     </span>
                   </div>
                   {b.triggerDescription && (

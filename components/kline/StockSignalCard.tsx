@@ -31,12 +31,12 @@ function ScoreBadge({ score, side }: { score: number; side: 'bull' | 'bear' }) {
   const accentColor = side === 'bull' ? UP_COLOR : DOWN_COLOR;
   const pct = Math.min(100, Math.max(0, score));
 
-  // label
+  // label — describes technical-criteria strength only; not a buy/sell call
   let label = '中性';
   let labelColor = '#8B8FA8';
-  if (score >= 70) { label = side === 'bull' ? '強烈看多' : '強烈看空'; labelColor = accentColor; }
-  else if (score >= 55) { label = side === 'bull' ? '偏多' : '偏空'; labelColor = accentColor; }
-  else if (score <= 35) { label = '偏弱'; labelColor = '#8B8FA8'; }
+  if (score >= 70) { label = '技術面強'; labelColor = accentColor; }
+  else if (score >= 55) { label = '技術面偏強'; labelColor = accentColor; }
+  else if (score <= 35) { label = '技術面偏弱'; labelColor = '#8B8FA8'; }
 
   return (
     <div style={{ marginTop: 8 }}>

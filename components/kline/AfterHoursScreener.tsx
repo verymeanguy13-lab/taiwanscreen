@@ -25,7 +25,7 @@ const WORKFLOW_STEPS = [
   { step: 1, text: '系統每日收盤後自動掃描全市場符合條件個股' },
   { step: 2, text: '於 09:00 前完成昨日收盤資料建立' },
   { step: 3, text: '09:00至9:20 開盤觀察量能是否配合訊號方向' },
-  { step: 4, text: '確認開盤方向後依據策略設定停利停損點位' },
+  { step: 4, text: '本頁僅呈現收盤後技術面篩選結果，不構成進出場建議，請自行判斷並承擔投資風險' },
 ];
 
 function toScanResult(r: any, side: 'bull' | 'bear'): ScanResult {
@@ -202,6 +202,9 @@ export function AfterHoursScreener() {
 
       <div style={{ padding: 16, borderBottom: `1px solid ${BORDER}` }}>
         <WorkflowGuide count={totalCount} />
+        <div style={{ marginTop: 8, fontSize: 11, color: '#8B8FA8', lineHeight: 1.5 }}>
+          以下為技術面條件掃描結果，僅供參考，不構成投資建議，不代表個股未來走勢。
+        </div>
       </div>
 
       <div style={{ display: 'flex', borderBottom: `1px solid ${BORDER}` }}>
@@ -210,7 +213,7 @@ export function AfterHoursScreener() {
           const count = tab === 'bull' ? bullResults.length : bearResults.length;
           return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, color: activeTab === tab ? color : '#8B8FA8', borderBottom: activeTab === tab ? `2px solid ${color}` : '2px solid transparent', background: 'transparent', cursor: 'pointer' }}>
-              {tab === 'bull' ? '看多' : '看空'}
+              {tab === 'bull' ? '技術面走強' : '技術面走弱'}
               <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 10, color, background: `${color}22`, border: `1px solid ${color}44` }}>
                 {count}
               </span>
@@ -225,7 +228,7 @@ export function AfterHoursScreener() {
             <FilterChips filters={BULL_STRATEGY_FILTERS} active={bullFilter} onSelect={setBullFilter} color={UP_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBull.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無看多訊號</div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無走強訊號</div>
               ) : (
                 filteredBull.map(({ result, raw }, i) => (
                   <div key={result.symbol} style={{ position: 'relative' }}>
@@ -248,7 +251,7 @@ export function AfterHoursScreener() {
             <FilterChips filters={BEAR_STRATEGY_FILTERS} active={bearFilter} onSelect={setBearFilter} color={DOWN_COLOR} />
             <div style={{ maxHeight: 560, overflowY: 'auto' }}>
               {filteredBear.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無看空訊號</div>
+                <div style={{ padding: 24, textAlign: 'center', color: '#8B8FA8', fontSize: 12 }}>暫無走弱訊號</div>
               ) : (
                 filteredBear.map(({ result, raw }, i) => (
                   <div key={result.symbol} style={{ position: 'relative' }}>

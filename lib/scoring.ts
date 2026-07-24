@@ -30,7 +30,7 @@ export interface DimensionScore {
 
 export interface ScoreResult {
   overall: number;
-  technicalReading: '技術面強勢' | '偏多訊號' | '中性' | '偏空訊號' | '技術面弱勢';
+  technicalReading: '技術面強勢' | '技術面轉強' | '中性' | '技術面轉弱' | '技術面弱勢';
   isIntraday: boolean;   // true when score uses live intraday price
   dimensions: {
     trend:     DimensionScore;
@@ -439,9 +439,9 @@ export function computeScore(
 
   const technicalReading: ScoreResult['technicalReading'] =
     overall >= 75 ? '技術面強勢' :
-    overall >= 60 ? '偏多訊號'   :
+    overall >= 60 ? '技術面轉強' :
     overall >= 40 ? '中性'       :
-    overall >= 25 ? '偏空訊號'   : '技術面弱勢';
+    overall >= 25 ? '技術面轉弱' : '技術面弱勢';
 
   return {
     overall: clamp(overall),
@@ -511,27 +511,27 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   // range still reaches 100.
   let profitability = 0;
   if (input.roe !== null) {
-    if (input.roe >= 20)      { profitability += 40; strengths.push('ROE優異(≥20%)'); }
+    if (input.roe >= 20)      { profitability += 40; strengths.push('ROE ≥ 20%'); }
     else if (input.roe >= 12) { profitability += 25; }
     else if (input.roe >= 8)  { profitability += 15; }
     else if (input.roe >= 5)  { profitability += 8; }
     else                      { warnings.push('ROE偏低'); }
   }
   if (input.gross_margin !== null) {
-    if (input.gross_margin >= 50)      { profitability += 50; strengths.push('毛利率高(≥50%)'); }
-    else if (input.gross_margin >= 30) { profitability += 35; strengths.push('毛利率良好'); }
+    if (input.gross_margin >= 50)      { profitability += 50; strengths.push('毛利率 ≥ 50%'); }
+    else if (input.gross_margin >= 30) { profitability += 35; strengths.push('毛利率 ≥ 30%'); }
     else if (input.gross_margin >= 15) { profitability += 15; }
     else                               { warnings.push('毛利率偏低'); }
   }
   if (input.net_margin != null) {
     const nm = Number(input.net_margin);
-    if (nm >= 20)      { profitability += 50; strengths.push('淨利率優異(≥20%)'); }
-    else if (nm >= 10) { profitability += 30; strengths.push('淨利率良好'); }
+    if (nm >= 20)      { profitability += 50; strengths.push('淨利率 ≥ 20%'); }
+    else if (nm >= 10) { profitability += 30; strengths.push('淨利率 ≥ 10%'); }
     else if (nm >= 5)  { profitability += 15; }
     else if (nm < 0)   { warnings.push('淨利率為負'); }
   }
   if (input.pe_ratio !== null) {
-    if (input.pe_ratio > 0 && input.pe_ratio <= 15)      { profitability += 30; strengths.push('本益比合理'); }
+    if (input.pe_ratio > 0 && input.pe_ratio <= 15)      { profitability += 30; strengths.push('本益比 ≤ 15'); }
     else if (input.pe_ratio > 0 && input.pe_ratio <= 25) { profitability += 15; }
     else if (input.pe_ratio > 40)                        { warnings.push('本益比偏高'); }
   }
@@ -566,7 +566,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const isFinancialSector = (input.sector ?? '').includes('金融');
   let safety = 0;
   if (input.debt_ratio !== null && !isFinancialSector) {
-    if (input.debt_ratio <= 30)      { safety += 40; strengths.push('負債比低(≤30%)'); }
+    if (input.debt_ratio <= 30)      { safety += 40; strengths.push('負債比 ≤ 30%'); }
     else if (input.debt_ratio <= 50) { safety += 25; }
     else if (input.debt_ratio > 70)  { warnings.push('負債比偏高'); }
   }

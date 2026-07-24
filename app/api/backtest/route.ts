@@ -27,7 +27,7 @@ export const PRESETS = [
   },
   {
     id:          'triple_buy',
-    name_zh:     '三買訊號',
+    name_zh:     '三大法人同買',
     description: '三大法人同日買進',
     filters:     { triple_buy: true } as ScreenerFilter,
   },
@@ -39,7 +39,7 @@ export const PRESETS = [
   },
   {
     id:          'momentum',
-    name_zh:     '飆股潛力',
+    name_zh:     '動能股',
     description: '漲幅 ≥ 5%，外資淨買超 ≥ 0',
     filters:     { change_pct_min: 5, foreign_net_min: 0 } as ScreenerFilter,
   },
@@ -51,7 +51,7 @@ export const PRESETS = [
   },
   {
     id:          'buffett',
-    name_zh:     '巴菲特選股',
+    name_zh:     '價值型選股',
     description: '本益比 ≤ 15，股價淨值比 ≤ 1.5，ROE ≥ 15%',
     filters:     { pe_max: 15, pb_max: 1.5, roe_min: 15 } as ScreenerFilter,
   },

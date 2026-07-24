@@ -279,7 +279,7 @@ export default function ChipsPage() {
               <Badge variant="blue">投信連買 {s.trust_consecutive_days} 日</Badge>
             )}
             {s.is_triple_buy && (
-              <Badge variant="gold">★ 三買訊號</Badge>
+              <Badge variant="gold">★ 三大法人同買</Badge>
             )}
           </div>
 

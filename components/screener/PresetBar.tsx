@@ -34,7 +34,7 @@ const PRESETS: Preset[] = [
   },
   {
     id: 'triple_buy',
-    label_zh: '三買訊號', label_en: 'Triple Buy',
+    label_zh: '三大法人同買', label_en: 'Triple Buy',
     desc_zh: '外資投信自營商同時呈現買超',
     filters: { triple_buy: true, volume_min: 200 },
   },
@@ -46,13 +46,13 @@ const PRESETS: Preset[] = [
   },
   {
     id: 'momentum',
-    label_zh: '飆股潛力', label_en: 'Momentum',
+    label_zh: '動能股', label_en: 'Momentum',
     desc_zh: '近月價格上漲且外資持續買超',
     filters: { foreign_net_min: 0, volume_min: 1000 },
   },
   {
     id: 'buffett',
-    label_zh: '巴菲特選股', label_en: 'Value (Buffett)',
+    label_zh: '價值型選股', label_en: 'Value (Buffett)',
     desc_zh: '低本益比、高ROE、低負債',
     filters: { pe_max: 15, pb_max: 1.5, roe_min: 15, debt_ratio_max: 40 },
   },

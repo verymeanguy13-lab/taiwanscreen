@@ -43,7 +43,7 @@ function alertDescription(alert: Alert): string {
   if (alert.alert_type === 'price_above') return `股價高於 NT$${alert.threshold ?? '—'}`;
   if (alert.alert_type === 'price_below') return `股價低於 NT$${alert.threshold ?? '—'}`;
   if (alert.alert_type === 'foreign_consec') return `外資連買超過 ${alert.threshold ?? '—'} 日`;
-  if (alert.alert_type === 'triple_buy') return '三買訊號出現';
+  if (alert.alert_type === 'triple_buy') return '三大法人同買出現';
   return alert.alert_type;
 }
 
