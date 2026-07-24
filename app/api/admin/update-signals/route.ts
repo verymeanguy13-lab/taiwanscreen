@@ -3,6 +3,7 @@ import { queryUnsafe } from '@/lib/db';
 import { sma, rsi as calcRsi, macd as calcMacd, bollingerBands } from '@/lib/indicators';
 import { detectAllBreakouts } from '@/lib/breakouts';
 import { evaluateAfterHours } from '@/lib/bullbearSignals';
+import { isMarketOpen, getTaipeiNow } from '@/lib/twseLive';
 
 function tradingDaysAgo(n: number): string {
   let count = 0;
@@ -21,93 +22,110 @@ export async function POST() {
   let updated5d  = 0;
   let updated10d = 0;
   let updated20d = 0;
+  let skippedNewSignals = false;
 
   try {
-    const allSymbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
-      `SELECT s.symbol, s.sector
-       FROM stocks s
-       JOIN daily_prices dp ON dp.symbol = s.symbol
-       WHERE dp.date = (SELECT MAX(date) FROM daily_prices)
-       ORDER BY dp.volume DESC
-       LIMIT 100`,
-      [],
-    );
+    // ── New-signal detection: ONLY when the market is actually closed ─────
+    // Previously ran regardless of time of day. If daily_prices' latest row
+    // for today is an intraday snapshot (not yet a settled close) — e.g.
+    // this route gets triggered manually mid-session — this would insert
+    // brand-new signals dated today, entry-priced off an unsettled number,
+    // while the rankings/accuracy UI labels it as "as of today's close."
+    // Confirmed live: a manual mid-day trigger produced exactly this.
+    if (!isMarketOpen()) {
+      const allSymbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
+        `SELECT s.symbol, s.sector
+         FROM stocks s
+         JOIN daily_prices dp ON dp.symbol = s.symbol
+         WHERE dp.date = (SELECT MAX(date) FROM daily_prices)
+         ORDER BY dp.volume DESC
+         LIMIT 100`,
+        [],
+      );
 
-    const todayDate = new Date().toISOString().slice(0, 10);
+      // Taiwan-timezone-correct "today," not raw UTC — same class of bug
+      // fixed elsewhere in this codebase (large-orders route, isMarketOpen).
+      const { date: todayDate } = getTaipeiNow();
 
-    await Promise.allSettled(allSymbols.map(async ({ symbol, sector }) => {
-      try {
-        const rows = await queryUnsafe<{
-          date: string; open: number; high: number;
-          low: number; close: number; volume: number;
-        }>(
-          `SELECT date, open, high, low, close, volume
-           FROM daily_prices WHERE symbol = $1
-           ORDER BY date DESC LIMIT 90`,
-          [symbol],
-        );
-        if (rows.length < 20) return;
-        const candles = rows.reverse();
-        const closes  = candles.map(c => c.close);
+      await Promise.allSettled(allSymbols.map(async ({ symbol, sector }) => {
+        try {
+          const rows = await queryUnsafe<{
+            date: string; open: number; high: number;
+            low: number; close: number; volume: number;
+          }>(
+            `SELECT date, open, high, low, close, volume
+             FROM daily_prices WHERE symbol = $1
+             ORDER BY date DESC LIMIT 90`,
+            [symbol],
+          );
+          if (rows.length < 20) return;
+          const candles = rows.reverse();
+          const closes  = candles.map(c => c.close);
 
-        const indicators = {
-          sma5:  sma(closes, 5),
-          sma20: sma(closes, 20),
-          sma60: sma(closes, 60),
-          rsi14: calcRsi(closes, 14),
-          macd:  calcMacd(closes),
-          bb:    bollingerBands(closes),
-        };
+          const indicators = {
+            sma5:  sma(closes, 5),
+            sma20: sma(closes, 20),
+            sma60: sma(closes, 60),
+            rsi14: calcRsi(closes, 14),
+            macd:  calcMacd(closes),
+            bb:    bollingerBands(closes),
+          };
 
-        const today = candles[candles.length - 1];
-        const breakouts = detectAllBreakouts(candles as any, indicators);
+          const today = candles[candles.length - 1];
+          const breakouts = detectAllBreakouts(candles as any, indicators);
 
-        for (const b of breakouts) {
-          try {
-            await queryUnsafe(
-              `INSERT INTO signal_results
-                 (symbol, signal_type, signal_date, entry_price, breakout_type, confidence, industry)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)
-               ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-              [symbol, b.type, todayDate, today.close, b.type, b.confidence, sector],
-            );
-            newSignals++;
-          } catch { /* skip */ }
-        }
+          for (const b of breakouts) {
+            try {
+              await queryUnsafe(
+                `INSERT INTO signal_results
+                   (symbol, signal_type, signal_date, entry_price, breakout_type, confidence, industry)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7)
+                 ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
+                [symbol, b.type, todayDate, today.close, b.type, b.confidence, sector],
+              );
+              newSignals++;
+            } catch { /* skip */ }
+          }
 
-        const afterHours = evaluateAfterHours(candles as any, {
-          sma5:  indicators.sma5,
-          sma20: indicators.sma20,
-          sma60: indicators.sma60,
-          bb:    indicators.bb,
-        });
-        for (const s of afterHours.bullStrategies) {
-          try {
-            await queryUnsafe(
-              `INSERT INTO signal_results
-                 (symbol, signal_type, signal_date, entry_price, confidence, industry)
-               VALUES ($1,$2,$3,$4,$5,$6)
-               ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-              [symbol, s, todayDate, today.close, afterHours.bullScore, sector],
-            );
-            newSignals++;
-          } catch { /* skip */ }
-        }
-      } catch { /* skip symbol */ }
-    }));
+          const afterHours = evaluateAfterHours(candles as any, {
+            sma5:  indicators.sma5,
+            sma20: indicators.sma20,
+            sma60: indicators.sma60,
+            bb:    indicators.bb,
+          });
+          for (const s of afterHours.bullStrategies) {
+            try {
+              await queryUnsafe(
+                `INSERT INTO signal_results
+                   (symbol, signal_type, signal_date, entry_price, confidence, industry)
+                 VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
+                [symbol, s, todayDate, today.close, afterHours.bullScore, sector],
+              );
+              newSignals++;
+            } catch { /* skip */ }
+          }
+        } catch { /* skip symbol */ }
+      }));
+    } else {
+      skippedNewSignals = true;
+    }
 
+    // ── Return% backfill: runs regardless of market hours ─────────────────
+    // Evaluates PAST signals against already-settled historical prices, so
+    // it's safe to run any time — unaffected by whether the market is open
+    // right now.
     for (const [days, col, retCol, upCol] of [
       [5,  'price_5d',  'return_5d',  'price_up_5d' ],
       [10, 'price_10d', 'return_10d', 'price_up_10d'],
       [20, 'price_20d', 'return_20d', 'price_up_20d'],
     ] as [number, string, string, string][]) {
       // targetDate is used ONLY as the eligibility filter (is this signal
-      // old enough that `days` trading days have definitely passed since it
-      // fired?) — NOT as the future-price lookup date. It was previously
-      // reused for both, which meant the "future" price could end up being
-      // fetched from at or near the signal's OWN entry date whenever
-      // targetDate landed close to signal_date — producing exactly 0.00%
-      // return for every signal, regardless of what the stock actually did.
+      // old enough that `days` trading days have definitely passed?) — NOT
+      // as the future-price lookup date. Previously reused for both, which
+      // meant the "future" price could be fetched from at/near the signal's
+      // OWN entry date, producing exactly 0.00% return for every signal
+      // regardless of actual price movement.
       const targetDate = tradingDaysAgo(days);
       const toUpdate = await queryUnsafe<{ id: number; symbol: string; entry_price: number; signal_date: string }>(
         `SELECT id, symbol, entry_price, signal_date
@@ -119,10 +137,8 @@ export async function POST() {
 
       for (const row of toUpdate) {
         try {
-          // The Nth actual trading day AFTER this signal's own date — using
-          // daily_prices' own row order (via OFFSET) rather than
-          // reimplementing trading-day arithmetic, so weekends/holidays are
-          // handled correctly automatically.
+          // Nth actual trading day AFTER this signal's own date, via
+          // daily_prices' own row order — correctly handles weekends/holidays.
           const priceRow = await queryUnsafe<{ close: number }>(
             `SELECT close FROM daily_prices
              WHERE symbol = $1 AND date > $2
@@ -151,7 +167,7 @@ export async function POST() {
 
   return NextResponse.json({
     success: true,
-    results: { newSignals, updated5d, updated10d, updated20d },
+    results: { newSignals, updated5d, updated10d, updated20d, skippedNewSignals },
     errors: allErrors,
   });
 }

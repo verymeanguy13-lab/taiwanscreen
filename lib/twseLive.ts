@@ -30,11 +30,10 @@ export function isMarketOpen(): boolean {
 
 /**
  * Current Taiwan date (YYYY-MM-DD) and minute-of-day, using the same
- * reliable UTC+8 math as isMarketOpen(). Used by the quote route to detect
- * the post-close-but-pre-cron window (13:30–18:30) where TWSE's live MIS
- * `z` field can still reflect the last continuous-trading tick rather than
- * the closing-auction-settled price, so daily_prices (if already populated
- * for today) should be preferred over the raw live tick.
+ * reliable UTC+8 math as isMarketOpen(). Used by signal-generation routes
+ * to correctly stamp "today" in Taiwan terms, and to detect the
+ * post-close-but-pre-cron window where TWSE's live tick can lag the
+ * closing auction's final settlement.
  */
 export function getTaipeiNow(): { date: string; minuteOfDay: number } {
   const now = new Date();
