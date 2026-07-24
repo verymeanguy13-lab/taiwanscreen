@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import type { ScoreResult } from '@/lib/scoring';
 import type { BreakoutSignal } from '@/lib/breakouts';
@@ -8,26 +8,26 @@ interface ScoreCardProps {
 }
 
 const READING_CONFIG = {
-  '技術面強勢': { color: '#FF4D6D', bg: '#3B0D1A' },
-  '偏多訊號':   { color: '#FF8FA3', bg: '#2D1020' },
-  '中性':       { color: '#8B8FA8', bg: '#1A1D2E' },
-  '偏空訊號':   { color: '#4DFFB8', bg: '#0D2420' },
-  '技術面弱勢': { color: '#00D4AA', bg: '#0D2E28' },
+  '?銵撘瑕': { color: '#FF4D6D', bg: '#3B0D1A' },
+  '??閮?':   { color: '#FF8FA3', bg: '#2D1020' },
+  '銝剜?:       { color: '#8B8FA8', bg: '#1A1D2E' },
+  '?征閮?':   { color: '#4DFFB8', bg: '#0D2420' },
+  '?銵撘勗': { color: '#00D4AA', bg: '#0D2E28' },
 } as const;
 
 const BREAKOUT_CONFIG = {
-  '上漲趨勢突破': { color: '#3D8EF8', bg: '#0D1B3B' },
-  '箱型整理突破': { color: '#F5B700', bg: '#3B2D00' },
-  '下跌V轉突破':  { color: '#FF4D6D', bg: '#3B0D0D' },
+  '銝撞頞典蝒': { color: '#3D8EF8', bg: '#0D1B3B' },
+  '蝞勗??渡?蝒': { color: '#F5B700', bg: '#3B2D00' },
+  '銝?V頧???:  { color: '#FF4D6D', bg: '#3B0D0D' },
 } as const;
 
 const DIMENSIONS = [
-  { key: 'trend',     label: '趨勢' },
-  { key: 'momentum',  label: '動能' },
-  { key: 'volume',    label: '量能' },
-  { key: 'chips',     label: '籌碼' },
-  { key: 'pattern',   label: '型態' },
-  { key: 'sentiment', label: '情緒' },
+  { key: 'trend',     label: '頞典' },
+  { key: 'momentum',  label: '?' },
+  { key: 'volume',    label: '?' },
+  { key: 'chips',     label: '蝐Ⅳ' },
+  { key: 'pattern',   label: '??' },
+  { key: 'sentiment', label: '??' },
 ] as const;
 
 function DimBar({ label, dim }: { label: string; dim: { score: number; reason: string } }) {
@@ -57,7 +57,7 @@ function DimBar({ label, dim }: { label: string; dim: { score: number; reason: s
 }
 
 export function ScoreCard({ score }: ScoreCardProps) {
-  const reading = READING_CONFIG[score.technicalReading] ?? READING_CONFIG['中性'];
+  const reading = READING_CONFIG[score.technicalReading] ?? READING_CONFIG['銝剜?];
 
   return (
     <div
@@ -69,7 +69,7 @@ export function ScoreCard({ score }: ScoreCardProps) {
         marginTop:    8,
       }}
     >
-      {/* ── Header: score + reading ──────────────────────────────────────── */}
+      {/* ?? Header: score + reading ???????????????????????????????????????? */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
         {/* Score circle */}
         <div
@@ -117,16 +117,16 @@ export function ScoreCard({ score }: ScoreCardProps) {
 
           {/* Signal matrix summary */}
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            強勢{' '}
+            撘瑕{' '}
             <span style={{ color: '#fff', fontWeight: 700 }}>{score.matrix.strengthCount}</span>
-            /9　量能{' '}
+            /9??{' '}
             <span style={{ color: '#fff', fontWeight: 700 }}>{score.matrix.volumeCount}</span>
             /6
           </div>
         </div>
       </div>
 
-      {/* ── Breakout chips ────────────────────────────────────────────────── */}
+      {/* ?? Breakout chips ?????????????????????????????????????????????????? */}
       {score.breakouts.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
           {score.breakouts.map((b: BreakoutSignal, i: number) => {
@@ -152,7 +152,7 @@ export function ScoreCard({ score }: ScoreCardProps) {
         </div>
       )}
 
-      {/* ── 6 dimension bars — 2 columns ─────────────────────────────────── */}
+      {/* ?? 6 dimension bars ??2 columns ??????????????????????????????????? */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
         {DIMENSIONS.map(({ key, label }) => {
           const dim = score.dimensions[key];
