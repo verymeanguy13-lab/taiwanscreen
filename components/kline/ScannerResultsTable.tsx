@@ -20,7 +20,7 @@ const BREAKOUT_CONFIG: Record<string, { color: string; bg: string }> = {
 };
 
 const SORT_OPTIONS = [
-  { label: '評分',   value: 'confidence' },
+  { label: '強度',   value: 'confidence' },
   { label: '漲跌%',  value: 'changePercent' },
   { label: '成交量', value: 'volume' },
 ];
@@ -88,7 +88,7 @@ export function ScannerResultsTable({ mode, side }: Props) {
 
   const summaryText = mode === 'scanner'
     ? `共掃描 ${totalScanned} 檔，找到 ${filtered.length} 個起漲訊號${signalDateLabel ? `（資料截至 ${signalDateLabel} 收盤）` : ''}`
-    : `今日${side === 'bull' ? '多方' : '空方'}名單共 ${filtered.length} 檔`;
+    : `今日技術面${side === 'bull' ? '走強' : '走弱'}清單共 ${filtered.length} 檔，僅供參考`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -164,7 +164,7 @@ export function ScannerResultsTable({ mode, side }: Props) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                {['排名', '代號', '股名', '現價', '漲跌%', '訊號類型', '強勢/量增', '評分'].map(h => (
+                {['排名', '代號', '股名', '現價', '漲跌%', '訊號類型', '強勢/量增', '強度'].map(h => (
                   <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: '#8B8FA8', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {h}
                   </th>

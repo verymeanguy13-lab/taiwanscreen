@@ -11,8 +11,8 @@ const TABS = [
 ];
 
 const AFTERHOURS_TABS = [
-  { label: '多方精選', value: 'bull' },
-  { label: '空方警示', value: 'bear' },
+  { label: '技術面走強', value: 'bull' },
+  { label: '技術面走弱', value: 'bear' },
 ];
 
 export default function RankingsPage() {

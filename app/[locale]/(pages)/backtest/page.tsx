@@ -106,6 +106,9 @@ function ResultCard({ result }: { result: BacktestResult }) {
           ))}
         </div>
       )}
+      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+        以上為歷史回測結果，不代表未來績效，不構成投資建議。
+      </div>
     </div>
   );
 }
