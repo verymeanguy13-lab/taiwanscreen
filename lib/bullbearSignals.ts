@@ -448,8 +448,11 @@ export function evaluateAfterHours(
   // ── Bull strategies ──────────────────────────────────────────────────────
 
   if (trend === '昨日強勢股')  addBull('昨日強勢股',  12);
-  if (trend === '近五日強勢股') addBull('近五日強勢股', 12);
-  if (trend === '近十日強勢股') addBull('近十日強勢股', 12);
+  // 近五日強勢股 removed — backtest: n=1044, win_5d=38.0%, avg_ret_5d=0.01%
+  // (no edge, worse than random at picking direction).
+  // 近十日強勢股 removed — backtest: n=57, win_5d=21.1%, win_10d=12.1%,
+  // avg_ret_5d=-4.56%, avg_ret_10d=-9.34% (actively predicts a decline,
+  // likely catching overextended stocks rather than genuine strength).
 
   // 開布林: close above upper BB
   if (bbUpper !== null && last.close > bbUpper)
