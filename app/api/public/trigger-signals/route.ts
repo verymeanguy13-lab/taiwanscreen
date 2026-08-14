@@ -14,8 +14,12 @@ import { sma, rsi as calcRsi, macd as calcMacd, bollingerBands } from '@/lib/ind
 import { detectAllBreakouts } from '@/lib/breakouts';
 import { evaluateAfterHours } from '@/lib/bullbearSignals';
 import { isMarketOpen, getTaipeiNow } from '@/lib/twseLive';
+import { getAllBacktestedConfidence } from '@/lib/signalConfidence';
 
 const sql = neon(process.env.DATABASE_URL!);
+
+const BULL_TYPES = ['昨日強勢股', '開布林', '突破均線', '突破壓力', '剛轉多', '突破趨勢線'];
+const BEAR_TYPES = ['昨日弱勢股', '跌破布林', '跌破均線', '空頭排列', '剛轉空', '綠柱放大'];
 
 function tradingDaysAgo(n: number): string {
   let count = 0;
@@ -30,19 +34,13 @@ function tradingDaysAgo(n: number): string {
 
 export async function POST() {
   try {
-    // Taiwan-timezone-correct "today" and day-of-week — raw new Date() UTC
-    // values were used before, the same class of bug fixed elsewhere in
-    // this codebase (isMarketOpen, large-orders route).
     const { date: todayDate } = getTaipeiNow();
     const taipeiDow = new Date(Date.now() + 8 * 60 * 60 * 1000).getUTCDay();
 
-    // ── Skip on weekends ──────────────────────────────────────────────────
     if (taipeiDow === 0 || taipeiDow === 6) {
       return NextResponse.json({ ok: true, skipped: true, reason: 'market closed (weekend)' });
     }
 
-    // ── Gate: skip if signals were already computed today ─────────────────
-    // Use a COUNT check rather than MAX — faster and works with sentinel row
     const [existing] = await sql`
       SELECT COUNT(*) as n FROM signal_results WHERE signal_date = ${todayDate}
     `;
@@ -57,16 +55,13 @@ export async function POST() {
     let updated20d = 0;
 
     if (!isMarketOpen()) {
-      // ── Sentinel: insert one placeholder row so concurrent requests skip ──
       try {
         await sql`
           INSERT INTO signal_results (symbol, signal_type, signal_date, entry_price, confidence)
           VALUES ('0000', '__sentinel__', ${todayDate}, 0, 0)
           ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING
         `;
-      } catch {
-        // If sentinel insert fails (e.g. FK constraint), fall through — not critical
-      }
+      } catch { /* not critical */ }
 
       const allSymbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
         `SELECT s.symbol, s.sector
@@ -77,6 +72,8 @@ export async function POST() {
          LIMIT 100`,
         [],
       );
+
+      const confidenceMap = await getAllBacktestedConfidence(BULL_TYPES, BEAR_TYPES);
 
       await Promise.allSettled(allSymbols.map(async ({ symbol, sector }) => {
         try {
@@ -124,6 +121,7 @@ export async function POST() {
             sma60: indicators.sma60,
             bb:    indicators.bb,
           });
+
           for (const s of afterHours.bullStrategies) {
             try {
               await queryUnsafe(
@@ -131,7 +129,23 @@ export async function POST() {
                    (symbol, signal_type, signal_date, entry_price, confidence, industry)
                  VALUES ($1,$2,$3,$4,$5,$6)
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-                [symbol, s, todayDate, today.close, afterHours.bullScore, sector],
+                [symbol, s, todayDate, today.close, confidenceMap[s] ?? 50, sector],
+              );
+              newSignals++;
+            } catch { /* skip */ }
+          }
+
+          // Bear strategies — PREVIOUSLY NEVER INSERTED AT ALL, same as the
+          // admin route. Computed correctly by evaluateAfterHours() but
+          // silently discarded here regardless of market conditions.
+          for (const s of afterHours.bearStrategies) {
+            try {
+              await queryUnsafe(
+                `INSERT INTO signal_results
+                   (symbol, signal_type, signal_date, entry_price, confidence, industry)
+                 VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
+                [symbol, s, todayDate, today.close, confidenceMap[s] ?? 50, sector],
               );
               newSignals++;
             } catch { /* skip */ }
@@ -140,18 +154,11 @@ export async function POST() {
       }));
     }
 
-    // ── Return% backfill: runs regardless of market hours ──────────────────
-    // Evaluates PAST signals against already-settled historical prices, so
-    // it's unaffected by whether the market is open right now.
     for (const [days, col, retCol, upCol] of [
       [5,  'price_5d',  'return_5d',  'price_up_5d' ],
       [10, 'price_10d', 'return_10d', 'price_up_10d'],
       [20, 'price_20d', 'return_20d', 'price_up_20d'],
     ] as [number, string, string, string][]) {
-      // targetDate is used ONLY as the eligibility filter here — NOT as
-      // the future-price lookup date. Previously reused for both, which
-      // could make the "future" price resolve to at/near the signal's OWN
-      // entry date, producing exactly 0.00% return for every signal.
       const targetDate = tradingDaysAgo(days);
       const toUpdate = await queryUnsafe<{ id: number; symbol: string; entry_price: number; signal_date: string }>(
         `SELECT id, symbol, entry_price, signal_date
@@ -163,8 +170,6 @@ export async function POST() {
 
       for (const row of toUpdate) {
         try {
-          // Nth actual trading day AFTER this signal's own date, via
-          // daily_prices' own row order — correctly handles weekends/holidays.
           const priceRow = await queryUnsafe<{ close: number }>(
             `SELECT close FROM daily_prices
              WHERE symbol = $1 AND date > $2

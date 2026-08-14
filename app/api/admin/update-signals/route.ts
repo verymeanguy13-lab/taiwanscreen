@@ -4,6 +4,10 @@ import { sma, rsi as calcRsi, macd as calcMacd, bollingerBands } from '@/lib/ind
 import { detectAllBreakouts } from '@/lib/breakouts';
 import { evaluateAfterHours } from '@/lib/bullbearSignals';
 import { isMarketOpen, getTaipeiNow } from '@/lib/twseLive';
+import { getAllBacktestedConfidence } from '@/lib/signalConfidence';
+
+const BULL_TYPES = ['昨日強勢股', '開布林', '突破均線', '突破壓力', '剛轉多', '突破趨勢線'];
+const BEAR_TYPES = ['昨日弱勢股', '跌破布林', '跌破均線', '空頭排列', '剛轉空', '綠柱放大'];
 
 function tradingDaysAgo(n: number): string {
   let count = 0;
@@ -25,13 +29,6 @@ export async function POST() {
   let skippedNewSignals = false;
 
   try {
-    // ── New-signal detection: ONLY when the market is actually closed ─────
-    // Previously ran regardless of time of day. If daily_prices' latest row
-    // for today is an intraday snapshot (not yet a settled close) — e.g.
-    // this route gets triggered manually mid-session — this would insert
-    // brand-new signals dated today, entry-priced off an unsettled number,
-    // while the rankings/accuracy UI labels it as "as of today's close."
-    // Confirmed live: a manual mid-day trigger produced exactly this.
     if (!isMarketOpen()) {
       const allSymbols = await queryUnsafe<{ symbol: string; sector: string | null }>(
         `SELECT s.symbol, s.sector
@@ -43,9 +40,12 @@ export async function POST() {
         [],
       );
 
-      // Taiwan-timezone-correct "today," not raw UTC — same class of bug
-      // fixed elsewhere in this codebase (large-orders route, isMarketOpen).
       const { date: todayDate } = getTaipeiNow();
+
+      // Computed ONCE per run, reused for all ~100 stocks — real,
+      // self-updating confidence per signal type, replacing the previous
+      // hardcoded guessed weights (e.g. "剛轉多: 18").
+      const confidenceMap = await getAllBacktestedConfidence(BULL_TYPES, BEAR_TYPES);
 
       await Promise.allSettled(allSymbols.map(async ({ symbol, sector }) => {
         try {
@@ -93,6 +93,9 @@ export async function POST() {
             sma60: indicators.sma60,
             bb:    indicators.bb,
           });
+
+          // Bull strategies — now stamped with per-type real confidence
+          // instead of the aggregate day-score.
           for (const s of afterHours.bullStrategies) {
             try {
               await queryUnsafe(
@@ -100,7 +103,24 @@ export async function POST() {
                    (symbol, signal_type, signal_date, entry_price, confidence, industry)
                  VALUES ($1,$2,$3,$4,$5,$6)
                  ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
-                [symbol, s, todayDate, today.close, afterHours.bullScore, sector],
+                [symbol, s, todayDate, today.close, confidenceMap[s] ?? 50, sector],
+              );
+              newSignals++;
+            } catch { /* skip */ }
+          }
+
+          // Bear strategies — PREVIOUSLY NEVER INSERTED AT ALL. Computed
+          // correctly by evaluateAfterHours() this whole time but silently
+          // discarded here, meaning downside signal detection has never
+          // actually been persisted regardless of market conditions.
+          for (const s of afterHours.bearStrategies) {
+            try {
+              await queryUnsafe(
+                `INSERT INTO signal_results
+                   (symbol, signal_type, signal_date, entry_price, confidence, industry)
+                 VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT (symbol, signal_type, signal_date) DO NOTHING`,
+                [symbol, s, todayDate, today.close, confidenceMap[s] ?? 50, sector],
               );
               newSignals++;
             } catch { /* skip */ }
@@ -112,20 +132,11 @@ export async function POST() {
     }
 
     // ── Return% backfill: runs regardless of market hours ─────────────────
-    // Evaluates PAST signals against already-settled historical prices, so
-    // it's safe to run any time — unaffected by whether the market is open
-    // right now.
     for (const [days, col, retCol, upCol] of [
       [5,  'price_5d',  'return_5d',  'price_up_5d' ],
       [10, 'price_10d', 'return_10d', 'price_up_10d'],
       [20, 'price_20d', 'return_20d', 'price_up_20d'],
     ] as [number, string, string, string][]) {
-      // targetDate is used ONLY as the eligibility filter (is this signal
-      // old enough that `days` trading days have definitely passed?) — NOT
-      // as the future-price lookup date. Previously reused for both, which
-      // meant the "future" price could be fetched from at/near the signal's
-      // OWN entry date, producing exactly 0.00% return for every signal
-      // regardless of actual price movement.
       const targetDate = tradingDaysAgo(days);
       const toUpdate = await queryUnsafe<{ id: number; symbol: string; entry_price: number; signal_date: string }>(
         `SELECT id, symbol, entry_price, signal_date
@@ -137,8 +148,6 @@ export async function POST() {
 
       for (const row of toUpdate) {
         try {
-          // Nth actual trading day AFTER this signal's own date, via
-          // daily_prices' own row order — correctly handles weekends/holidays.
           const priceRow = await queryUnsafe<{ close: number }>(
             `SELECT close FROM daily_prices
              WHERE symbol = $1 AND date > $2
