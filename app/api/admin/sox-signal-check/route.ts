@@ -1,37 +1,10 @@
 // =============================================================================
 // app/api/admin/sox-signal-check/route.ts
 //
-// Tests, in BOTH directions:
-//   BULL: Dow + S&P 500 + Nasdaq + SOX all closed UP, AND TX night futures
-//         session closed UP -> did 0050 gap UP at next day's open?
-//   BEAR: Dow + S&P 500 + Nasdaq + SOX all closed DOWN, AND TX night futures
-//         session closed DOWN -> did 0050 gap DOWN at next day's open?
-//
-// IMPORTANT — what this measures vs. what it doesn't:
-// This checks 0050's daily OPEN vs the PRIOR day's CLOSE (a "gap" test), not
-// the literal first-15-minutes price move — no free historical intraday
-// (minute-level) data source for 0050 was found. Say so if you share these
-// numbers anywhere.
-//
-// Data sources:
-//   - 0050 daily open/close: your own `daily_prices` table
-//   - TX night session open/close: FinMind `TaiwanFuturesDaily`, via the
-//     existing FINMIND_TOKEN env var already used elsewhere in this repo
-//   - Dow/S&P/Nasdaq/SOX daily closes: Stooq's free CSV endpoint (no key)
-//
-// TWO UNVERIFIED ASSUMPTIONS (flagged, not silently assumed correct — check
-// both via ?debug=1 before trusting the numbers):
-//   1. FinMind night-session date convention — same caveat as before: a
-//      night-session row dated `date` is assumed to be the session that
-//      feeds into that same date's day-session/open.
-//   2. Stooq ticker symbols for the 4 indices: ^dji (Dow), ^spx (S&P 500),
-//      ^ndq (Nasdaq Composite), ^sox (Philadelphia Semiconductor). These are
-//      Stooq's standard US index tickers but have not been fetched and
-//      eyeballed here. In debug mode, check `indexLatestSample` — the
-//      magnitudes should look like: Dow ~40,000s, S&P 500 ~5,000-6,000s,
-//      Nasdaq Composite ~17,000-20,000s, SOX ~5,000-6,000s. If any of them
-//      look off by orders of magnitude or come back empty, the ticker is
-//      wrong — tell me and I'll fix it.
+// DIAGNOSTIC VERSION — same logic as before, but ?debug=1 now also returns
+// the RAW response info from Stooq and FinMind (status codes + first ~300
+// chars of body) so we can see exactly why they returned empty/zero data
+// last time, instead of guessing.
 // =============================================================================
 
 import { NextResponse } from 'next/server';
@@ -45,7 +18,7 @@ interface DailyPriceRow {
 
 interface FinMindTXRow {
   date: string;
-  trading_session: string; // 'position' | 'after_market'
+  trading_session: string;
   open: number;
   close: number;
 }
@@ -62,11 +35,17 @@ const INDICES = [
   { key: 'sox', ticker: '^sox', label: 'Philadelphia Semiconductor (SOX)' },
 ] as const;
 
-async function fetchStooqDaily(ticker: string): Promise<StooqRow[]> {
-  const res = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(ticker)}&i=d`);
-  if (!res.ok) throw new Error(`Stooq fetch failed for ${ticker}: ${res.status}`);
-  const csv = await res.text();
-  const lines = csv.trim().split('\n').slice(1);
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/csv,text/plain,*/*',
+};
+
+async function fetchStooqDaily(ticker: string, debug: boolean) {
+  const res = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(ticker)}&i=d`, {
+    headers: BROWSER_HEADERS,
+  });
+  const raw = await res.text();
+  const lines = raw.trim().split('\n').slice(1);
   const rows: StooqRow[] = [];
   for (const line of lines) {
     const parts = line.split(',');
@@ -75,27 +54,41 @@ async function fetchStooqDaily(ticker: string): Promise<StooqRow[]> {
     if (date && !Number.isNaN(close)) rows.push({ date, close });
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));
-  return rows;
+  return {
+    rows,
+    debugInfo: debug ? { status: res.status, ok: res.ok, bodyPreview: raw.slice(0, 300) } : undefined,
+  };
 }
 
-async function fetchTxFuturesDaily(startDate: string): Promise<FinMindTXRow[]> {
+async function fetchTxFuturesDaily(startDate: string, debug: boolean) {
   const token = process.env.FINMIND_TOKEN;
-  if (!token) throw new Error('FINMIND_TOKEN not set');
   const url = new URL('https://api.finmindtrade.com/api/v4/data');
   url.searchParams.set('dataset', 'TaiwanFuturesDaily');
   url.searchParams.set('data_id', 'TX');
   url.searchParams.set('start_date', startDate);
   const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error(`FinMind fetch failed: ${res.status}`);
-  const json = await res.json();
-  return (json.data ?? []) as FinMindTXRow[];
+  const raw = await res.text();
+  let json: any = null;
+  try { json = JSON.parse(raw); } catch { /* leave null, raw preview will show why */ }
+  const data = (json?.data ?? []) as FinMindTXRow[];
+  return {
+    data,
+    debugInfo: debug ? {
+      hasToken: Boolean(token),
+      status: res.status,
+      ok: res.ok,
+      topLevelMsg: json?.msg ?? null,
+      topLevelStatus: json?.status ?? null,
+      rowCount: data.length,
+      firstFewRows: data.slice(0, 6),
+      rawPreview: raw.slice(0, 300),
+    } : undefined,
+  };
 }
 
-// For a given "today" date, find the most recent index close strictly before
-// it, and the one before that, and return whether it went up / down.
-function indexDirection(dates: string[], byDate: Map<string, number>, today: string): { up: boolean; down: boolean } | null {
+function indexDirection(dates: string[], byDate: Map<string, number>, today: string) {
   const priorDate = [...dates].reverse().find(d => d < today);
   if (!priorDate) return null;
   const priorIdx = dates.indexOf(priorDate);
@@ -110,7 +103,6 @@ export async function GET(request: Request) {
   const debug = searchParams.get('debug') === '1';
 
   try {
-    // ---- 1. 0050 daily prices from your own DB ----
     const priceRows = await sql`
       SELECT date::text AS date, open, close
       FROM daily_prices
@@ -123,32 +115,29 @@ export async function GET(request: Request) {
     }
     const earliestDate = priceRows[0].date;
 
-    // ---- 2. 4 US indices (Stooq, free) ----
-    const indexData = await Promise.all(
+    const indexResults = await Promise.all(
       INDICES.map(async idx => {
-        const rows = await fetchStooqDaily(idx.ticker);
+        const { rows, debugInfo } = await fetchStooqDaily(idx.ticker, debug);
         return {
           ...idx,
           dates: rows.map(r => r.date),
           byDate: new Map(rows.map(r => [r.date, r.close])),
           latest: rows.slice(-1)[0] ?? null,
+          debugInfo,
         };
       })
     );
 
-    // ---- 3. TX futures day+night session (FinMind) ----
-    const txRows = await fetchTxFuturesDaily(earliestDate);
+    const { data: txRows, debugInfo: txDebugInfo } = await fetchTxFuturesDaily(earliestDate, debug);
     const txByDate = new Map<string, { nightOpen?: number; nightClose?: number }>();
     for (const row of txRows) {
       if (row.trading_session !== 'after_market') continue;
       txByDate.set(row.date, { nightOpen: row.open, nightClose: row.close });
     }
 
-    // ---- 4. Walk through 0050 trading days, evaluate both signals ----
     let bullSignalDays = 0, bullHitDays = 0;
     let bearSignalDays = 0, bearHitDays = 0;
     let totalDaysAll = 0, gapUpDaysAll = 0, gapDownDaysAll = 0;
-
     const bullDetails: Array<{ date: string; gapUp: boolean }> = [];
     const bearDetails: Array<{ date: string; gapDown: boolean }> = [];
     const skipped: Array<{ date: string; reason: string }> = [];
@@ -157,24 +146,15 @@ export async function GET(request: Request) {
       const today = priceRows[i];
       const prevClose = priceRows[i - 1].close;
       const todayOpen = today.open;
-      if (todayOpen == null || prevClose == null) {
-        skipped.push({ date: today.date, reason: 'missing open/prevClose' });
-        continue;
-      }
+      if (todayOpen == null || prevClose == null) { skipped.push({ date: today.date, reason: 'missing open/prevClose' }); continue; }
 
-      const dirs = indexData.map(idx => indexDirection(idx.dates as string[], idx.byDate as Map<string, number>, today.date));
-      if (dirs.some(d => d === null)) {
-        skipped.push({ date: today.date, reason: 'missing index data' });
-        continue;
-      }
+      const dirs = indexResults.map(idx => indexDirection(idx.dates as string[], idx.byDate as Map<string, number>, today.date));
+      if (dirs.some(d => d === null)) { skipped.push({ date: today.date, reason: 'missing index data' }); continue; }
       const allUp = dirs.every(d => d!.up);
       const allDown = dirs.every(d => d!.down);
 
       const tx = txByDate.get(today.date);
-      if (!tx || tx.nightOpen == null || tx.nightClose == null) {
-        skipped.push({ date: today.date, reason: 'no TX night session data' });
-        continue;
-      }
+      if (!tx || !tx.nightOpen || !tx.nightClose) { skipped.push({ date: today.date, reason: 'no TX night session data' }); continue; }
       const nightUp = tx.nightClose > tx.nightOpen;
       const nightDown = tx.nightClose < tx.nightOpen;
 
@@ -185,16 +165,8 @@ export async function GET(request: Request) {
       if (gapUp) gapUpDaysAll++;
       if (gapDown) gapDownDaysAll++;
 
-      if (allUp && nightUp) {
-        bullSignalDays++;
-        if (gapUp) bullHitDays++;
-        bullDetails.push({ date: today.date, gapUp });
-      }
-      if (allDown && nightDown) {
-        bearSignalDays++;
-        if (gapDown) bearHitDays++;
-        bearDetails.push({ date: today.date, gapDown });
-      }
+      if (allUp && nightUp) { bullSignalDays++; if (gapUp) bullHitDays++; bullDetails.push({ date: today.date, gapUp }); }
+      if (allDown && nightDown) { bearSignalDays++; if (gapDown) bearHitDays++; bearDetails.push({ date: today.date, gapDown }); }
     }
 
     const bullHitRate = bullSignalDays > 0 ? (bullHitDays / bullSignalDays) * 100 : null;
@@ -205,19 +177,13 @@ export async function GET(request: Request) {
     const response: Record<string, unknown> = {
       note: 'Measures 0050 OPEN vs PRIOR CLOSE (a gap test), not the first-15-minutes move.',
       bull: {
-        description: 'Dow+SP500+Nasdaq+SOX all up AND TX night session up -> 0050 gapped up next day?',
-        signalDays: bullSignalDays,
-        hitDays: bullHitDays,
-        hitRate: bullHitRate,
+        signalDays: bullSignalDays, hitDays: bullHitDays, hitRate: bullHitRate,
         baseRate: gapUpBaseRate,
         edge: bullHitRate !== null && gapUpBaseRate !== null ? bullHitRate - gapUpBaseRate : null,
         recent: bullDetails.slice(-20),
       },
       bear: {
-        description: 'Dow+SP500+Nasdaq+SOX all down AND TX night session down -> 0050 gapped down next day?',
-        signalDays: bearSignalDays,
-        hitDays: bearHitDays,
-        hitRate: bearHitRate,
+        signalDays: bearSignalDays, hitDays: bearHitDays, hitRate: bearHitRate,
         baseRate: gapDownBaseRate,
         edge: bearHitRate !== null && gapDownBaseRate !== null ? bearHitRate - gapDownBaseRate : null,
         recent: bearDetails.slice(-20),
@@ -226,8 +192,8 @@ export async function GET(request: Request) {
     };
 
     if (debug) {
-      response.indexLatestSample = indexData.map(idx => ({ key: idx.key, label: idx.label, ticker: idx.ticker, latest: idx.latest }));
-      response.txSampleAlignment = priceRows.slice(-10).map(p => ({ date: p.date, tx: txByDate.get(p.date) ?? null }));
+      response.DIAGNOSTIC_stooq = indexResults.map(idx => ({ key: idx.key, ticker: idx.ticker, latest: idx.latest, ...idx.debugInfo }));
+      response.DIAGNOSTIC_finmind = txDebugInfo;
       response.skippedSample = skipped.slice(-20);
       response.skippedCount = skipped.length;
     }
