@@ -1,21 +1,11 @@
 // =============================================================================
 // app/api/admin/sox-signal-check/route.ts
 //
-// v4 fixes:
-//   - Stooq was blocking server requests with a JS bot-check (confirmed via
-//     diagnostics) -> switched to Yahoo Finance's public chart JSON endpoint,
-//     which needs no key and no JS execution.
-//   - FinMind TaiwanFuturesDaily returns MULTIPLE contract months per date
-//     (front month, next month, quarterly...). Previous code grabbed
-//     whichever row came last, often an untraded far-out contract with
-//     open=0/close=0. Fixed: now picks the highest-VOLUME row per date+
-//     session, i.e. the actively-traded front-month contract.
-//
-// Still flagged as unverified, check in ?debug=1:
-//   - Yahoo tickers used: ^DJI, ^GSPC, ^IXIC, ^SOX. Check DIAGNOSTIC_yahoo
-//     for sane latest values (Dow ~40,000s, S&P500 ~5-6,000s, Nasdaq
-//     Composite ~17-20,000s, SOX ~5-6,000s).
-//   - FinMind night-session date convention (same caveat as before).
+// v5 adds: on days that already triggered a bull/bear signal AND gapped the
+// expected direction, does the price EXTEND through the day (close further
+// in the same direction than the open) or FADE back (close moves back
+// toward/past the prior close)? Uses data already in daily_prices — no new
+// data source needed.
 // =============================================================================
 
 import { NextResponse } from 'next/server';
@@ -47,19 +37,17 @@ const INDICES = [
   { key: 'sox', ticker: '^SOX', label: 'Philadelphia Semiconductor (SOX)' },
 ] as const;
 
-async function fetchYahooDaily(ticker: string, debug: boolean) {
+async function fetchYahooDaily(ticker: string) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1d`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
   });
   const raw = await res.text();
   let json: any = null;
-  try { json = JSON.parse(raw); } catch { /* handled below via null json */ }
-
+  try { json = JSON.parse(raw); } catch { /* leave null */ }
   const result = json?.chart?.result?.[0];
   const timestamps: number[] = result?.timestamp ?? [];
   const closes: number[] = result?.indicators?.quote?.[0]?.close ?? [];
-
   const rows: IndexRow[] = [];
   for (let i = 0; i < timestamps.length; i++) {
     const c = closes[i];
@@ -68,20 +56,10 @@ async function fetchYahooDaily(ticker: string, debug: boolean) {
     rows.push({ date, close: c });
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));
-
-  return {
-    rows,
-    debugInfo: debug ? {
-      status: res.status,
-      ok: res.ok,
-      yahooError: json?.chart?.error ?? null,
-      rowCount: rows.length,
-      bodyPreview: raw.slice(0, 300),
-    } : undefined,
-  };
+  return rows;
 }
 
-async function fetchTxFuturesDaily(startDate: string, debug: boolean) {
+async function fetchTxFuturesDaily(startDate: string) {
   const token = process.env.FINMIND_TOKEN;
   const url = new URL('https://api.finmindtrade.com/api/v4/data');
   url.searchParams.set('dataset', 'TaiwanFuturesDaily');
@@ -92,31 +70,16 @@ async function fetchTxFuturesDaily(startDate: string, debug: boolean) {
   });
   const raw = await res.text();
   let json: any = null;
-  try { json = JSON.parse(raw); } catch { /* handled below */ }
+  try { json = JSON.parse(raw); } catch { /* leave null */ }
   const data = (json?.data ?? []) as FinMindTXRow[];
 
-  // Pick the highest-volume (front-month) row per date+session
   const bestByKey = new Map<string, FinMindTXRow>();
   for (const row of data) {
     const key = `${row.date}|${row.trading_session}`;
     const existing = bestByKey.get(key);
-    if (!existing || row.volume > existing.volume) {
-      bestByKey.set(key, row);
-    }
+    if (!existing || row.volume > existing.volume) bestByKey.set(key, row);
   }
-
-  return {
-    frontMonthRows: [...bestByKey.values()],
-    debugInfo: debug ? {
-      hasToken: Boolean(token),
-      status: res.status,
-      ok: res.ok,
-      topLevelMsg: json?.msg ?? null,
-      rawRowCount: data.length,
-      frontMonthRowCount: bestByKey.size,
-      sampleFrontMonthRows: [...bestByKey.values()].slice(-6),
-    } : undefined,
-  };
+  return [...bestByKey.values()];
 }
 
 function indexDirection(dates: string[], byDate: Map<string, number>, today: string) {
@@ -148,36 +111,32 @@ export async function GET(request: Request) {
 
     const indexResults = await Promise.all(
       INDICES.map(async idx => {
-        const { rows, debugInfo } = await fetchYahooDaily(idx.ticker, debug);
-        return {
-          ...idx,
-          dates: rows.map(r => r.date),
-          byDate: new Map(rows.map(r => [r.date, r.close])),
-          latest: rows.slice(-1)[0] ?? null,
-          debugInfo,
-        };
+        const rows = await fetchYahooDaily(idx.ticker);
+        return { ...idx, dates: rows.map(r => r.date), byDate: new Map(rows.map(r => [r.date, r.close])) };
       })
     );
 
-    const { frontMonthRows, debugInfo: txDebugInfo } = await fetchTxFuturesDaily(earliestDate, debug);
+    const frontMonthRows = await fetchTxFuturesDaily(earliestDate);
     const txByDate = new Map<string, { nightOpen?: number; nightClose?: number }>();
     for (const row of frontMonthRows) {
       if (row.trading_session !== 'after_market') continue;
       txByDate.set(row.date, { nightOpen: row.open, nightClose: row.close });
     }
 
-    let bullSignalDays = 0, bullHitDays = 0;
-    let bearSignalDays = 0, bearHitDays = 0;
-    let totalDaysAll = 0, gapUpDaysAll = 0, gapDownDaysAll = 0;
-    const bullDetails: Array<{ date: string; gapUp: boolean }> = [];
-    const bearDetails: Array<{ date: string; gapDown: boolean }> = [];
+    let bullSignalDays = 0, bullGapHitDays = 0, bullExtendDays = 0, bullFadeDays = 0;
+    let bearSignalDays = 0, bearGapHitDays = 0, bearExtendDays = 0, bearFadeDays = 0;
+    let totalDaysAll = 0, gapUpDaysAll = 0, gapDownDaysAll = 0, closeUpDaysAll = 0, closeDownDaysAll = 0;
+
+    const bullDetails: Array<{ date: string; gapUp: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' }> = [];
+    const bearDetails: Array<{ date: string; gapDown: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' }> = [];
     const skipped: Array<{ date: string; reason: string }> = [];
 
     for (let i = 1; i < priceRows.length; i++) {
       const today = priceRows[i];
       const prevClose = priceRows[i - 1].close;
       const todayOpen = today.open;
-      if (todayOpen == null || prevClose == null) { skipped.push({ date: today.date, reason: 'missing open/prevClose' }); continue; }
+      const todayClose = today.close;
+      if (todayOpen == null || prevClose == null || todayClose == null) { skipped.push({ date: today.date, reason: 'missing open/close/prevClose' }); continue; }
 
       const dirs = indexResults.map(idx => indexDirection(idx.dates as string[], idx.byDate as Map<string, number>, today.date));
       if (dirs.some(d => d === null)) { skipped.push({ date: today.date, reason: 'missing index data' }); continue; }
@@ -195,36 +154,75 @@ export async function GET(request: Request) {
       totalDaysAll++;
       if (gapUp) gapUpDaysAll++;
       if (gapDown) gapDownDaysAll++;
+      if (todayClose > todayOpen) closeUpDaysAll++;
+      if (todayClose < todayOpen) closeDownDaysAll++;
 
-      if (allUp && nightUp) { bullSignalDays++; if (gapUp) bullHitDays++; bullDetails.push({ date: today.date, gapUp }); }
-      if (allDown && nightDown) { bearSignalDays++; if (gapDown) bearHitDays++; bearDetails.push({ date: today.date, gapDown }); }
+      if (allUp && nightUp) {
+        bullSignalDays++;
+        if (gapUp) bullGapHitDays++;
+        // "extend" = close continued higher than the open (rode the gap further up)
+        // "fade" = close came back down below the open (gave the gap back)
+        const closeVsOpen: 'extend' | 'fade' | 'flat' = todayClose > todayOpen ? 'extend' : todayClose < todayOpen ? 'fade' : 'flat';
+        if (closeVsOpen === 'extend') bullExtendDays++;
+        if (closeVsOpen === 'fade') bullFadeDays++;
+        bullDetails.push({ date: today.date, gapUp, closeVsOpen });
+      }
+      if (allDown && nightDown) {
+        bearSignalDays++;
+        if (gapDown) bearGapHitDays++;
+        // "extend" = close continued lower than the open (rode the gap further down)
+        // "fade" = close came back up above the open (gave the gap back)
+        const closeVsOpen: 'extend' | 'fade' | 'flat' = todayClose < todayOpen ? 'extend' : todayClose > todayOpen ? 'fade' : 'flat';
+        if (closeVsOpen === 'extend') bearExtendDays++;
+        if (closeVsOpen === 'fade') bearFadeDays++;
+        bearDetails.push({ date: today.date, gapDown, closeVsOpen });
+      }
     }
 
-    const bullHitRate = bullSignalDays > 0 ? (bullHitDays / bullSignalDays) * 100 : null;
-    const bearHitRate = bearSignalDays > 0 ? (bearHitDays / bearSignalDays) * 100 : null;
+    const bullGapHitRate = bullSignalDays > 0 ? (bullGapHitDays / bullSignalDays) * 100 : null;
+    const bearGapHitRate = bearSignalDays > 0 ? (bearGapHitDays / bearSignalDays) * 100 : null;
     const gapUpBaseRate = totalDaysAll > 0 ? (gapUpDaysAll / totalDaysAll) * 100 : null;
     const gapDownBaseRate = totalDaysAll > 0 ? (gapDownDaysAll / totalDaysAll) * 100 : null;
 
+    // Among the days where the gap actually hit, how often did it extend vs fade?
+    const bullExtendRate = bullGapHitDays > 0 ? (bullExtendDays / bullGapHitDays) * 100 : null;
+    const bullFadeRate = bullGapHitDays > 0 ? (bullFadeDays / bullGapHitDays) * 100 : null;
+    const bearExtendRate = bearGapHitDays > 0 ? (bearExtendDays / bearGapHitDays) * 100 : null;
+    const bearFadeRate = bearGapHitDays > 0 ? (bearFadeDays / bearGapHitDays) * 100 : null;
+
+    const closeUpBaseRate = totalDaysAll > 0 ? (closeUpDaysAll / totalDaysAll) * 100 : null;
+    const closeDownBaseRate = totalDaysAll > 0 ? (closeDownDaysAll / totalDaysAll) * 100 : null;
+
     const response: Record<string, unknown> = {
-      note: 'Measures 0050 OPEN vs PRIOR CLOSE (a gap test), not the first-15-minutes move.',
+      note: 'gapHitRate = did 0050 gap the expected direction at open. extendRate/fadeRate = AMONG those gap-hit days, did the close continue further the same direction (extend) or reverse back (fade) by end of day.',
       bull: {
-        signalDays: bullSignalDays, hitDays: bullHitDays, hitRate: bullHitRate,
-        baseRate: gapUpBaseRate,
-        edge: bullHitRate !== null && gapUpBaseRate !== null ? bullHitRate - gapUpBaseRate : null,
+        signalDays: bullSignalDays,
+        gapHitDays: bullGapHitDays,
+        gapHitRate: bullGapHitRate,
+        gapBaseRate: gapUpBaseRate,
+        extendDays: bullExtendDays,
+        fadeDays: bullFadeDays,
+        extendRate: bullExtendRate,
+        fadeRate: bullFadeRate,
+        extendBaseRate: closeUpBaseRate,
         recent: bullDetails.slice(-20),
       },
       bear: {
-        signalDays: bearSignalDays, hitDays: bearHitDays, hitRate: bearHitRate,
-        baseRate: gapDownBaseRate,
-        edge: bearHitRate !== null && gapDownBaseRate !== null ? bearHitRate - gapDownBaseRate : null,
+        signalDays: bearSignalDays,
+        gapHitDays: bearGapHitDays,
+        gapHitRate: bearGapHitRate,
+        gapBaseRate: gapDownBaseRate,
+        extendDays: bearExtendDays,
+        fadeDays: bearFadeDays,
+        extendRate: bearExtendRate,
+        fadeRate: bearFadeRate,
+        extendBaseRate: closeDownBaseRate,
         recent: bearDetails.slice(-20),
       },
       totalDaysEvaluated: totalDaysAll,
     };
 
     if (debug) {
-      response.DIAGNOSTIC_yahoo = indexResults.map(idx => ({ key: idx.key, ticker: idx.ticker, latest: idx.latest, ...idx.debugInfo }));
-      response.DIAGNOSTIC_finmind = txDebugInfo;
       response.skippedSample = skipped.slice(-20);
       response.skippedCount = skipped.length;
     }
