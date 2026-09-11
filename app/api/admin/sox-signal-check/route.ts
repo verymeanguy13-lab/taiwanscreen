@@ -1,10 +1,21 @@
 // =============================================================================
 // app/api/admin/sox-signal-check/route.ts
 //
-// DIAGNOSTIC VERSION — same logic as before, but ?debug=1 now also returns
-// the RAW response info from Stooq and FinMind (status codes + first ~300
-// chars of body) so we can see exactly why they returned empty/zero data
-// last time, instead of guessing.
+// v4 fixes:
+//   - Stooq was blocking server requests with a JS bot-check (confirmed via
+//     diagnostics) -> switched to Yahoo Finance's public chart JSON endpoint,
+//     which needs no key and no JS execution.
+//   - FinMind TaiwanFuturesDaily returns MULTIPLE contract months per date
+//     (front month, next month, quarterly...). Previous code grabbed
+//     whichever row came last, often an untraded far-out contract with
+//     open=0/close=0. Fixed: now picks the highest-VOLUME row per date+
+//     session, i.e. the actively-traded front-month contract.
+//
+// Still flagged as unverified, check in ?debug=1:
+//   - Yahoo tickers used: ^DJI, ^GSPC, ^IXIC, ^SOX. Check DIAGNOSTIC_yahoo
+//     for sane latest values (Dow ~40,000s, S&P500 ~5-6,000s, Nasdaq
+//     Composite ~17-20,000s, SOX ~5-6,000s).
+//   - FinMind night-session date convention (same caveat as before).
 // =============================================================================
 
 import { NextResponse } from 'next/server';
@@ -21,42 +32,52 @@ interface FinMindTXRow {
   trading_session: string;
   open: number;
   close: number;
+  volume: number;
 }
 
-interface StooqRow {
+interface IndexRow {
   date: string;
   close: number;
 }
 
 const INDICES = [
-  { key: 'dji', ticker: '^dji', label: 'Dow Jones' },
-  { key: 'spx', ticker: '^spx', label: 'S&P 500' },
-  { key: 'ndq', ticker: '^ndq', label: 'Nasdaq Composite' },
-  { key: 'sox', ticker: '^sox', label: 'Philadelphia Semiconductor (SOX)' },
+  { key: 'dji', ticker: '^DJI', label: 'Dow Jones' },
+  { key: 'spx', ticker: '^GSPC', label: 'S&P 500' },
+  { key: 'ndq', ticker: '^IXIC', label: 'Nasdaq Composite' },
+  { key: 'sox', ticker: '^SOX', label: 'Philadelphia Semiconductor (SOX)' },
 ] as const;
 
-const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'text/csv,text/plain,*/*',
-};
-
-async function fetchStooqDaily(ticker: string, debug: boolean) {
-  const res = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(ticker)}&i=d`, {
-    headers: BROWSER_HEADERS,
+async function fetchYahooDaily(ticker: string, debug: boolean) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1d`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
   });
   const raw = await res.text();
-  const lines = raw.trim().split('\n').slice(1);
-  const rows: StooqRow[] = [];
-  for (const line of lines) {
-    const parts = line.split(',');
-    const date = parts[0];
-    const close = parseFloat(parts[4]);
-    if (date && !Number.isNaN(close)) rows.push({ date, close });
+  let json: any = null;
+  try { json = JSON.parse(raw); } catch { /* handled below via null json */ }
+
+  const result = json?.chart?.result?.[0];
+  const timestamps: number[] = result?.timestamp ?? [];
+  const closes: number[] = result?.indicators?.quote?.[0]?.close ?? [];
+
+  const rows: IndexRow[] = [];
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c == null) continue;
+    const date = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
+    rows.push({ date, close: c });
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     rows,
-    debugInfo: debug ? { status: res.status, ok: res.ok, bodyPreview: raw.slice(0, 300) } : undefined,
+    debugInfo: debug ? {
+      status: res.status,
+      ok: res.ok,
+      yahooError: json?.chart?.error ?? null,
+      rowCount: rows.length,
+      bodyPreview: raw.slice(0, 300),
+    } : undefined,
   };
 }
 
@@ -71,19 +92,29 @@ async function fetchTxFuturesDaily(startDate: string, debug: boolean) {
   });
   const raw = await res.text();
   let json: any = null;
-  try { json = JSON.parse(raw); } catch { /* leave null, raw preview will show why */ }
+  try { json = JSON.parse(raw); } catch { /* handled below */ }
   const data = (json?.data ?? []) as FinMindTXRow[];
+
+  // Pick the highest-volume (front-month) row per date+session
+  const bestByKey = new Map<string, FinMindTXRow>();
+  for (const row of data) {
+    const key = `${row.date}|${row.trading_session}`;
+    const existing = bestByKey.get(key);
+    if (!existing || row.volume > existing.volume) {
+      bestByKey.set(key, row);
+    }
+  }
+
   return {
-    data,
+    frontMonthRows: [...bestByKey.values()],
     debugInfo: debug ? {
       hasToken: Boolean(token),
       status: res.status,
       ok: res.ok,
       topLevelMsg: json?.msg ?? null,
-      topLevelStatus: json?.status ?? null,
-      rowCount: data.length,
-      firstFewRows: data.slice(0, 6),
-      rawPreview: raw.slice(0, 300),
+      rawRowCount: data.length,
+      frontMonthRowCount: bestByKey.size,
+      sampleFrontMonthRows: [...bestByKey.values()].slice(-6),
     } : undefined,
   };
 }
@@ -117,7 +148,7 @@ export async function GET(request: Request) {
 
     const indexResults = await Promise.all(
       INDICES.map(async idx => {
-        const { rows, debugInfo } = await fetchStooqDaily(idx.ticker, debug);
+        const { rows, debugInfo } = await fetchYahooDaily(idx.ticker, debug);
         return {
           ...idx,
           dates: rows.map(r => r.date),
@@ -128,9 +159,9 @@ export async function GET(request: Request) {
       })
     );
 
-    const { data: txRows, debugInfo: txDebugInfo } = await fetchTxFuturesDaily(earliestDate, debug);
+    const { frontMonthRows, debugInfo: txDebugInfo } = await fetchTxFuturesDaily(earliestDate, debug);
     const txByDate = new Map<string, { nightOpen?: number; nightClose?: number }>();
-    for (const row of txRows) {
+    for (const row of frontMonthRows) {
       if (row.trading_session !== 'after_market') continue;
       txByDate.set(row.date, { nightOpen: row.open, nightClose: row.close });
     }
@@ -192,7 +223,7 @@ export async function GET(request: Request) {
     };
 
     if (debug) {
-      response.DIAGNOSTIC_stooq = indexResults.map(idx => ({ key: idx.key, ticker: idx.ticker, latest: idx.latest, ...idx.debugInfo }));
+      response.DIAGNOSTIC_yahoo = indexResults.map(idx => ({ key: idx.key, ticker: idx.ticker, latest: idx.latest, ...idx.debugInfo }));
       response.DIAGNOSTIC_finmind = txDebugInfo;
       response.skippedSample = skipped.slice(-20);
       response.skippedCount = skipped.length;
