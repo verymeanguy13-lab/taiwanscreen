@@ -127,8 +127,8 @@ export async function GET(request: Request) {
     let bearSignalDays = 0, bearGapHitDays = 0, bearExtendDays = 0, bearFadeDays = 0;
     let totalDaysAll = 0, gapUpDaysAll = 0, gapDownDaysAll = 0, closeUpDaysAll = 0, closeDownDaysAll = 0;
 
-    const bullDetails: Array<{ date: string; gapUp: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' }> = [];
-    const bearDetails: Array<{ date: string; gapDown: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' }> = [];
+    const bullDetails: Array<{ date: string; gapUp: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' | 'n/a' }> = [];
+    const bearDetails: Array<{ date: string; gapDown: boolean; closeVsOpen: 'extend' | 'fade' | 'flat' | 'n/a' }> = [];
     const skipped: Array<{ date: string; reason: string }> = [];
 
     for (let i = 1; i < priceRows.length; i++) {
@@ -159,22 +159,30 @@ export async function GET(request: Request) {
 
       if (allUp && nightUp) {
         bullSignalDays++;
-        if (gapUp) bullGapHitDays++;
         // "extend" = close continued higher than the open (rode the gap further up)
         // "fade" = close came back down below the open (gave the gap back)
-        const closeVsOpen: 'extend' | 'fade' | 'flat' = todayClose > todayOpen ? 'extend' : todayClose < todayOpen ? 'fade' : 'flat';
-        if (closeVsOpen === 'extend') bullExtendDays++;
-        if (closeVsOpen === 'fade') bullFadeDays++;
+        // Only counted on days the gap actually hit — that's what "among gap-hit days" means.
+        let closeVsOpen: 'extend' | 'fade' | 'flat' | 'n/a' = 'n/a';
+        if (gapUp) {
+          bullGapHitDays++;
+          closeVsOpen = todayClose > todayOpen ? 'extend' : todayClose < todayOpen ? 'fade' : 'flat';
+          if (closeVsOpen === 'extend') bullExtendDays++;
+          if (closeVsOpen === 'fade') bullFadeDays++;
+        }
         bullDetails.push({ date: today.date, gapUp, closeVsOpen });
       }
       if (allDown && nightDown) {
         bearSignalDays++;
-        if (gapDown) bearGapHitDays++;
         // "extend" = close continued lower than the open (rode the gap further down)
         // "fade" = close came back up above the open (gave the gap back)
-        const closeVsOpen: 'extend' | 'fade' | 'flat' = todayClose < todayOpen ? 'extend' : todayClose > todayOpen ? 'fade' : 'flat';
-        if (closeVsOpen === 'extend') bearExtendDays++;
-        if (closeVsOpen === 'fade') bearFadeDays++;
+        // Only counted on days the gap actually hit.
+        let closeVsOpen: 'extend' | 'fade' | 'flat' | 'n/a' = 'n/a';
+        if (gapDown) {
+          bearGapHitDays++;
+          closeVsOpen = todayClose < todayOpen ? 'extend' : todayClose > todayOpen ? 'fade' : 'flat';
+          if (closeVsOpen === 'extend') bearExtendDays++;
+          if (closeVsOpen === 'fade') bearFadeDays++;
+        }
         bearDetails.push({ date: today.date, gapDown, closeVsOpen });
       }
     }
