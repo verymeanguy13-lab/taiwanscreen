@@ -249,6 +249,15 @@ export async function GET(request: Request) {
 
     const bullMoveStats = stats(bullOpenToCloseMoves);
     const bearMoveStats = stats(bearOpenToCloseMoves);
+
+    // CONTRARIAN: sell/short on bull-signal days, buy/long on bear-signal days —
+    // just the negation of each day's move, recomputed properly (not just
+    // flipping the mean, since pctProfitableNetOfCost doesn't mirror linearly).
+    const bullContrarianMoves = bullOpenToCloseMoves.map(v => -v);
+    const bearContrarianMoves = bearOpenToCloseMoves.map(v => -v);
+    const bullContrarianStats = stats(bullContrarianMoves);
+    const bearContrarianStats = stats(bearContrarianMoves);
+
     const baselineAvgAbsMove = baselineAbsMoves.length > 0
       ? baselineAbsMoves.reduce((a, b) => a + b, 0) / baselineAbsMoves.length
       : null;
@@ -266,7 +275,8 @@ export async function GET(request: Request) {
         extendRate: bullExtendRate,
         fadeRate: bullFadeRate,
         extendBaseRate: closeUpBaseRate,
-        openToCloseMovePct: bullMoveStats,
+        openToCloseMovePct_asLong: bullMoveStats,
+        openToCloseMovePct_asShort_CONTRARIAN: bullContrarianStats,
         recent: bullDetails.slice(-20),
       },
       bear: {
@@ -279,7 +289,8 @@ export async function GET(request: Request) {
         extendRate: bearExtendRate,
         fadeRate: bearFadeRate,
         extendBaseRate: closeDownBaseRate,
-        openToCloseMovePct: bearMoveStats,
+        openToCloseMovePct_asShort: bearMoveStats,
+        openToCloseMovePct_asLong_CONTRARIAN: bearContrarianStats,
         recent: bearDetails.slice(-20),
       },
       baselineAvgAbsOpenToCloseMovePct: baselineAvgAbsMove,
