@@ -201,8 +201,61 @@ export async function GET(request: Request) {
     const closeUpBaseRate = totalDaysAll > 0 ? (closeUpDaysAll / totalDaysAll) * 100 : null;
     const closeDownBaseRate = totalDaysAll > 0 ? (closeDownDaysAll / totalDaysAll) * 100 : null;
 
+    // ---- NET-OF-COST ANALYSIS ----
+    // IMPORTANT: entering via a market-open order means you CANNOT capture the
+    // overnight gap itself — your entry price already reflects it. The only
+    // capturable P&L for a same-day entry/exit trade is the OPEN-TO-CLOSE move,
+    // net of round-trip transaction costs. This computes that, not gap size.
+    const roundTripCostPct = Number(searchParams.get('costPct') ?? '0.2'); // tax + commission estimate, override with ?costPct=
+
+    function pctMove(from: number, to: number) { return ((to - from) / from) * 100; }
+    function stats(values: number[]) {
+      if (values.length === 0) return { mean: null, median: null, min: null, max: null, pctProfitableNetOfCost: null };
+      const sorted = [...values].sort((a, b) => a - b);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      const median = sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[(sorted.length - 1) / 2];
+      const pctProfitableNetOfCost = (values.filter(v => v > roundTripCostPct).length / values.length) * 100;
+      return { mean, median, min: sorted[0], max: sorted[sorted.length - 1], pctProfitableNetOfCost };
+    }
+
+    // Open-to-close move, SIGNED so it's positive when it moved in the direction
+    // you'd have traded (up for bull signal, down for bear signal — reported as
+    // a positive "gain" for a short/sell position).
+    const bullOpenToCloseMoves: number[] = [];
+    const bearOpenToCloseMoves: number[] = [];
+    const baselineAbsMoves: number[] = [];
+
+    for (let i = 1; i < priceRows.length; i++) {
+      const today = priceRows[i];
+      const prevClose = priceRows[i - 1].close;
+      const todayOpen = today.open;
+      const todayClose = today.close;
+      if (todayOpen == null || prevClose == null || todayClose == null) continue;
+      baselineAbsMoves.push(Math.abs(pctMove(todayOpen, todayClose)));
+    }
+    for (const d of bullDetails) {
+      const row = priceRows.find(p => p.date === d.date);
+      const prevRow = priceRows[priceRows.findIndex(p => p.date === d.date) - 1];
+      if (!row || !prevRow || row.open == null || row.close == null || !d.gapUp) continue;
+      bullOpenToCloseMoves.push(pctMove(row.open, row.close)); // positive = gained holding long from open to close
+    }
+    for (const d of bearDetails) {
+      const row = priceRows.find(p => p.date === d.date);
+      if (!row || row.open == null || row.close == null || !d.gapDown) continue;
+      bearOpenToCloseMoves.push(-pctMove(row.open, row.close)); // negate: positive = gained holding short from open to close
+    }
+
+    const bullMoveStats = stats(bullOpenToCloseMoves);
+    const bearMoveStats = stats(bearOpenToCloseMoves);
+    const baselineAvgAbsMove = baselineAbsMoves.length > 0
+      ? baselineAbsMoves.reduce((a, b) => a + b, 0) / baselineAbsMoves.length
+      : null;
+
     const response: Record<string, unknown> = {
-      note: 'gapHitRate = did 0050 gap the expected direction at open. extendRate/fadeRate = AMONG those gap-hit days, did the close continue further the same direction (extend) or reverse back (fade) by end of day.',
+      note: 'gapHitRate = did 0050 open in the expected direction. IMPORTANT: entering at the open cannot capture that gap — your entry price already reflects it. netOfCost figures below use the OPEN-TO-CLOSE move (what a same-day entry/exit trade could actually capture), minus an estimated round-trip cost.',
+      roundTripCostPctUsed: roundTripCostPct,
       bull: {
         signalDays: bullSignalDays,
         gapHitDays: bullGapHitDays,
@@ -213,6 +266,7 @@ export async function GET(request: Request) {
         extendRate: bullExtendRate,
         fadeRate: bullFadeRate,
         extendBaseRate: closeUpBaseRate,
+        openToCloseMovePct: bullMoveStats,
         recent: bullDetails.slice(-20),
       },
       bear: {
@@ -225,8 +279,10 @@ export async function GET(request: Request) {
         extendRate: bearExtendRate,
         fadeRate: bearFadeRate,
         extendBaseRate: closeDownBaseRate,
+        openToCloseMovePct: bearMoveStats,
         recent: bearDetails.slice(-20),
       },
+      baselineAvgAbsOpenToCloseMovePct: baselineAvgAbsMove,
       totalDaysEvaluated: totalDaysAll,
     };
 
