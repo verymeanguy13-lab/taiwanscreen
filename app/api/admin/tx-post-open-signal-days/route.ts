@@ -131,11 +131,31 @@ export async function GET(request: Request) {
     const noneDates: string[] = [];
     const excluded: Array<{ date: string; reason: string }> = [];
 
+    // 4-condition diagnostic (indices only, ignores TX's own night
+    // direction). NOT a replacement for the real signal ??used only to
+    // check whether condition #5 is what causes the post-open TX result
+    // to look null, by seeing if the same all-4-up/all-4-down grouping
+    // (irrespective of TX's own overnight move) behaves differently.
+    const bull4Dates: string[] = [];
+    const bear4Dates: string[] = [];
+    const none4Dates: string[] = [];
+    const excluded4: Array<{ date: string; reason: string }> = [];
+
     for (const date of tradingDates) {
       const dirs = indexResults.map(idx => indexDirection(idx.dates as string[], idx.byDate as Map<string, number>, date));
-      if (dirs.some(d => d === null)) { excluded.push({ date, reason: 'missing index data' }); continue; }
+      if (dirs.some(d => d === null)) {
+        excluded.push({ date, reason: 'missing index data' });
+        excluded4.push({ date, reason: 'missing index data' });
+        continue;
+      }
       const allUp = dirs.every(d => d!.up);
       const allDown = dirs.every(d => d!.down);
+
+      // 4-condition classification only needs the indices, so it's
+      // available even on the 6 dates where TX night data was missing.
+      if (allUp) bull4Dates.push(date);
+      else if (allDown) bear4Dates.push(date);
+      else none4Dates.push(date);
 
       const tx = txByDate.get(date);
       if (!tx || tx.nightOpen == null || tx.nightClose == null) { excluded.push({ date, reason: 'no TX night session data' }); continue; }
@@ -148,7 +168,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      note: 'Read-only. Signal definition identical to sox-signal-check: BULL = Dow+S&P500+Nasdaq+SOX all up vs prior close AND TX night close > night open; BEAR = all down AND night close < night open; else NONE.',
+      note: 'Read-only. Signal definition identical to sox-signal-check: BULL = Dow+S&P500+Nasdaq+SOX all up vs prior close AND TX night close > night open; BEAR = all down AND night close < night open; else NONE. bull4Dates/bear4Dates/none4Dates are a DIAGNOSTIC-ONLY 4-condition version (indices only, ignoring TX night direction) ??not a replacement for the real signal.',
       startDate, endDate,
       totalTradingDates: tradingDates.length,
       bullCount: bullDates.length,
@@ -158,6 +178,12 @@ export async function GET(request: Request) {
       excluded,
       bullDates,
       bearDates,
+      bull4Count: bull4Dates.length,
+      bear4Count: bear4Dates.length,
+      none4Count: none4Dates.length,
+      excluded4Count: excluded4.length,
+      bull4Dates,
+      bear4Dates,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
