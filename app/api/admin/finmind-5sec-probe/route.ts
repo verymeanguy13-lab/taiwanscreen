@@ -12,11 +12,11 @@
 
 import { NextResponse } from 'next/server';
 
-async function probe(dataset: string, date: string) {
+async function probe(dataset: string, date: string, includeDataId: boolean) {
   const token = process.env.FINMIND_TOKEN;
   const url = new URL('https://api.finmindtrade.com/api/v4/data');
   url.searchParams.set('dataset', dataset);
-  url.searchParams.set('data_id', 'TAIEX');
+  if (includeDataId) url.searchParams.set('data_id', 'TAIEX');
   url.searchParams.set('start_date', date);
   url.searchParams.set('end_date', date);
 
@@ -47,8 +47,9 @@ export async function GET(request: Request) {
   const date = searchParams.get('date') ?? '2026-09-16';
 
   const results = await Promise.all([
-    probe('TaiwanVariousIndicators5Seconds', date),
-    probe('TaiwanStockEvery5SecondsIndex', date),
+    probe('TaiwanVariousIndicators5Seconds', date, false),
+    probe('TaiwanVariousIndicators5Seconds', date, true),
+    probe('TaiwanStockEvery5SecondsIndex', date, false),
   ]);
 
   return NextResponse.json({ note: 'Read-only probe, no analysis performed.', date, results });
