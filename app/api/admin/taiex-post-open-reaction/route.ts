@@ -12,11 +12,14 @@
 //     available tick within +/-15s of the target, since exact grid
 //     alignment isn't guaranteed every day)
 //
-// Fetching the full 2023-2026 range in one call would exceed Vercel's
-// function timeout, so this processes month-by-month starting at
-// `cursor` (default: start_date) and stops with enough time budget left
-// to respond cleanly, returning `nextCursor` to resume from. Call
-// repeatedly with ?cursor=<nextCursor> until `done: true`.
+// Fetching the full 2023-2026 range would need one FinMind call per day
+// (this dataset only supports single-day queries -- confirmed via probe:
+// passing end_date returns "the dataset size is too large, we only send
+// one day data"), which exceeds Vercel's function timeout if done in one
+// request. So this processes day-by-day starting at `cursor` (default:
+// start_date) and stops with enough time budget left to respond cleanly,
+// returning `nextCursor` to resume from. Call repeatedly with
+// ?cursor=<nextCursor> until `done: true`.
 //
 // Query params: start_date, end_date (both required on the first call).
 // cursor optional (defaults to start_date).
@@ -33,30 +36,27 @@ const HORIZONS = ['09:00:05', '09:01:00', '09:02:00', '09:03:00', '09:05:00',
                    '09:10:00', '09:15:00', '09:30:00', '10:00:00', '11:00:00',
                    '12:00:00', '13:30:00'];
 
-async function fetchMonth(monthStart: string, monthEnd: string): Promise<FinMindRow[]> {
+async function fetchDay(date: string): Promise<FinMindRow[]> {
   const token = process.env.FINMIND_TOKEN;
   const url = new URL('https://api.finmindtrade.com/api/v4/data');
   url.searchParams.set('dataset', 'TaiwanVariousIndicators5Seconds');
-  url.searchParams.set('start_date', monthStart);
-  url.searchParams.set('end_date', monthEnd);
+  url.searchParams.set('start_date', date);
+  // No end_date: FinMind only allows single-day queries on this dataset.
   const res = await fetch(url.toString(), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   const json = await res.json() as { data?: FinMindRow[]; msg?: string };
-  if (!json.data) throw new Error(`FinMind error for ${monthStart}..${monthEnd}: ${json.msg ?? 'unknown'}`);
+  if (!json.data) throw new Error(`FinMind error for ${date}: ${json.msg ?? 'unknown'}`);
   return json.data;
 }
 
-function nextMonthStart(d: string): string {
+function nextCalendarDay(d: string): string {
   const dt = new Date(d + 'T00:00:00Z');
-  dt.setUTCMonth(dt.getUTCMonth() + 1);
-  dt.setUTCDate(1);
+  dt.setUTCDate(dt.getUTCDate() + 1);
   return dt.toISOString().slice(0, 10);
 }
 
-function monthEnd(monthStartStr: string): string {
-  const dt = new Date(monthStartStr + 'T00:00:00Z');
-  dt.setUTCMonth(dt.getUTCMonth() + 1);
-  dt.setUTCDate(0);
-  return dt.toISOString().slice(0, 10);
+function isWeekend(d: string): boolean {
+  const dow = new Date(d + 'T00:00:00Z').getUTCDay();
+  return dow === 0 || dow === 6;
 }
 
 function timeToSeconds(t: string): number {
@@ -76,47 +76,39 @@ export async function GET(request: Request) {
   const deadline = Date.now() + 8000; // leave buffer under the 10s Hobby limit
   const perDay: Array<Record<string, unknown>> = [];
   let cur = cursor;
-  let prevDayLastTick: number | null = null; // carries across month boundaries within this call
+  let prevDayLastTick: number | null = null; // carries across days within this call
 
   try {
     while (cur <= endDate && Date.now() < deadline) {
-      const mEnd = monthEnd(cur) > endDate ? endDate : monthEnd(cur);
-      const rows = await fetchMonth(cur, mEnd);
+      if (isWeekend(cur)) { cur = nextCalendarDay(cur); continue; }
 
-      const byDay = new Map<string, FinMindRow[]>();
-      for (const r of rows) {
-        const [datePart] = r.date.split(' ');
-        if (!byDay.has(datePart)) byDay.set(datePart, []);
-        byDay.get(datePart)!.push(r);
+      const dayRows = (await fetchDay(cur)).sort((a, b) => a.date.localeCompare(b.date));
+      if (dayRows.length === 0) {
+        // Taiwan holiday or no data for this date -- skip, don't treat as fatal.
+        cur = nextCalendarDay(cur);
+        continue;
       }
 
-      const days = [...byDay.keys()].sort();
-      for (const day of days) {
-        const dayRows = byDay.get(day)!.sort((a, b) => a.date.localeCompare(b.date));
-        if (dayRows.length === 0) continue;
+      const prevClose = prevDayLastTick;
+      const openRow = dayRows.find(r => r.date.endsWith('09:00:00')) ?? dayRows[0];
+      const openPrice = openRow.TAIEX;
 
-        const prevClose = prevDayLastTick;
-        const openRow = dayRows.find(r => r.date.endsWith('09:00:00')) ?? dayRows[0];
-        const openPrice = openRow.TAIEX;
-
-        const horizonPrices: Record<string, number | null> = {};
-        for (const h of HORIZONS) {
-          const targetSec = timeToSeconds(h);
-          let best: FinMindRow | null = null;
-          let bestDiff = Infinity;
-          for (const r of dayRows) {
-            const t = r.date.split(' ')[1];
-            const diff = Math.abs(timeToSeconds(t) - targetSec);
-            if (diff < bestDiff && diff <= 15) { bestDiff = diff; best = r; }
-          }
-          horizonPrices[h] = best ? best.TAIEX : null;
+      const horizonPrices: Record<string, number | null> = {};
+      for (const h of HORIZONS) {
+        const targetSec = timeToSeconds(h);
+        let best: FinMindRow | null = null;
+        let bestDiff = Infinity;
+        for (const r of dayRows) {
+          const t = r.date.split(' ')[1];
+          const diff = Math.abs(timeToSeconds(t) - targetSec);
+          if (diff < bestDiff && diff <= 15) { bestDiff = diff; best = r; }
         }
-
-        perDay.push({ date: day, prevClose, openPrice, ...horizonPrices, tickCount: dayRows.length });
-        prevDayLastTick = dayRows[dayRows.length - 1].TAIEX;
+        horizonPrices[h] = best ? best.TAIEX : null;
       }
 
-      cur = nextMonthStart(cur);
+      perDay.push({ date: cur, prevClose, openPrice, ...horizonPrices, tickCount: dayRows.length });
+      prevDayLastTick = dayRows[dayRows.length - 1].TAIEX;
+      cur = nextCalendarDay(cur);
     }
 
     const done = cur > endDate;
