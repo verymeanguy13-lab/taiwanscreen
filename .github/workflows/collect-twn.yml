@@ -1,0 +1,54 @@
+name: Collect TWN observations
+
+# Times below are UTC. Taipei = UTC+8, so each Taipei slot is the PREVIOUS
+# UTC calendar day. "days-of-week 0-4" (Sun-Thu UTC) = Mon-Fri Taipei.
+# Target Taipei times -> UTC:
+#   04:30 -> 20:30   04:45 -> 20:45   04:55 -> 20:55
+#   05:00 -> 21:00   05:01 -> 21:01   05:02 -> 21:02
+#   05:05 -> 21:05   05:10 -> 21:10   05:15 -> 21:15
+#
+# GitHub's own docs: scheduled workflows are NOT guaranteed to run exactly on
+# time, especially during high load -- can be several minutes late. This is
+# expected and handled: the endpoint stores both the intended slot label and
+# the actual collection timestamp, so drift is visible, not hidden.
+
+on:
+  schedule:
+    - cron: '30 20 * * 0-4'   # 04:30 Taipei
+    - cron: '45 20 * * 0-4'   # 04:45 Taipei
+    - cron: '55 20 * * 0-4'   # 04:55 Taipei
+    - cron: '0 21 * * 0-4'    # 05:00 Taipei
+    - cron: '1 21 * * 0-4'    # 05:01 Taipei
+    - cron: '2 21 * * 0-4'    # 05:02 Taipei
+    - cron: '5 21 * * 0-4'    # 05:05 Taipei
+    - cron: '10 21 * * 0-4'   # 05:10 Taipei
+    - cron: '15 21 * * 0-4'   # 05:15 Taipei
+  workflow_dispatch:          # allows manual trigger for testing
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine intended slot from current UTC time
+        id: slot
+        run: |
+          NOW=$(date -u +%H:%M)
+          case "$NOW" in
+            20:2[5-9]|20:3[0-4]) SLOT="04:30" ;;
+            20:4[0-9]) SLOT="04:45" ;;
+            20:5[0-9]) SLOT="04:55" ;;
+            21:00) SLOT="05:00" ;;
+            21:01) SLOT="05:01" ;;
+            21:02|21:03|21:04) SLOT="05:02" ;;
+            21:0[5-9]) SLOT="05:05" ;;
+            21:1[0-4]) SLOT="05:10" ;;
+            21:1[5-9]) SLOT="05:15" ;;
+            *) SLOT="unknown_$NOW" ;;
+          esac
+          echo "slot=$SLOT" >> "$GITHUB_OUTPUT"
+
+      - name: Call collection endpoint
+        run: |
+          curl -sS -X GET \
+            "https://taiwanscreen.vercel.app/api/cron/collect-twn?secret=${{ secrets.TWN_COLLECT_SECRET }}&slot=${{ steps.slot.outputs.slot }}" \
+            --fail-with-body
